@@ -143,7 +143,7 @@ function resource_request
     SLEEP_AMT=8
     RETRIES_AMT=1
     USERNAME=""
-    set -A RESOURCES
+    set -A RESOURCES || RESOURCES=( )
     RESOURCE_DIR=$(dirname "${PROGRAM_DIR}")/var/resource/
     RESOURCE_DELIMITER="="
 
@@ -159,7 +159,7 @@ function resource_request
                          ;;
             --user     ) USERNAME="$2";    shift 2
                          ;;
-            *          ) set -A RESOURCES $(printf "%s\n" "${@}" | sort)
+            *          ) set -A RESOURCES $(printf "%s\n" "${@}" | sort) || RESOURCES=( $(printf "%s\n" "${@}" | sort) )
                          shift $#
                          ;;
 
@@ -172,7 +172,7 @@ function resource_request
 
     ii=0
     loops=0
-    set -A RELEASE_LIST
+    set -A RELEASE_LIST || RELEASE_LIST=( )
 
     # Go through all resources requested
     while [[ "${ii}" -lt "${#RESOURCES[@]}" ]]
@@ -273,7 +273,7 @@ function resource_release
     SLEEP_AMT=8
     RETRIES_AMT=1
     USERNAME=""
-    set -A RESOURCES
+    set -A RESOURCES || RESOURCES=( )
     RESOURCE_DIR=$(dirname "${PROGRAM_DIR}")/var/resource/
 
     # Go through all the options
@@ -288,7 +288,7 @@ function resource_release
                          ;;
             --user     ) USERNAME="$2";    shift 2
                          ;;
-            *          ) set -A RESOURCES $(printf "%s\n" "${@}" | sort -r)
+            *          ) set -A RESOURCES $(printf "%s\n" "${@}" | sort -r) || RESOURCES=( $(printf "%s\n" "${@}" | sort -r) )
                          shift $#
                          ;;
 
@@ -351,7 +351,7 @@ function check_relative_path
 
         if [[ -n "${FILEDIR}" ]]
         then
-            echo "${FILEDIR}/${FILEBASE}"
+            printf "%s\n" "${FILEDIR}/${FILEBASE}"
             return
         fi
 
@@ -367,7 +367,7 @@ function check_relative_path
         FILEPATH="${1}"
     fi
 
-    echo "${FILEPATH}"
+    printf "%s\n" "${FILEPATH}"
 }
 
 function ends_with
