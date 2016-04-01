@@ -1,0 +1,1937 @@
+#!/bin/sh
+#--------------------------------------------------------------------------------------------------------------------
+# Script      : etlw
+# Summary     : A generic script to call ETL code
+# Details     : This script acts as a wrapper for any scheduler such as tws or control-m to call any ETL code module,
+#               including ab initio graphs, psets, simple ksh scripts etc.  Its intention is to provide a generic 
+#               technology neutral ETL abstraction Layer, reducing custom development when integrating and calling
+#               ETL jobs via a scheduler, separating wrapper scripts from underlying ETL technology specifics such as
+#               environment setup or post run activities etc but also provide standardised formatting for quicker
+#               production defect resolution.
+#
+#               This script implements a number of customisation options through environment variables, command line
+#               options as well as the introduction of override files (think custom .profile files).  These options
+#               allow developers / administrators to set varied configuration options depending on the ETL job
+#               being called e.g. redirect log output to different directories for different code branches,
+#               executing modules under a different user id for different projects, turn off module execution or
+#               perform enhanced validation for specific job names etc.
+#
+#               The exact order of precedence of these configuration options are as follows:
+#                                                                                                                             _ _
+#                     1. (e) - Environment variables                                                                           |
+#                     2. (i) - Explicit script includes passed to the wrapper                                                  |
+#                     3. (c) - Command line options                                                                            |
+#                     4. (u) - User level override file              (${HOME}/.etl/etl_overrides.ksh)                          |
+#                     5. (j) - User level Jobname override file      (${HOME}/.etl/etl_overrides.jobname.<jobname>.ksh)        |
+#                     6. (p) - User level Project override file      (${HOME}/.etl/etl_overrides.project.<project>.ksh)        |
+#                     7. (b) - User level Branch override file       (${HOME}/.etl/etl_overrides.branch.<branch>.ksh)          |
+#                     8. (s) - User level System level override file (${HOME}/.etl/etl_overrides.system.<system>.ksh)          |
+#                     9. (h) - User level Host level override file   (${HOME}/.etl/etl_overrides.host.<host>.ksh)              |
+#                    10. (G) - Global level override file            (<install dir>/conf/etl_overrides.ksh)                    |
+#                    11. (J) - Global Jobname override file          (<install dir>/conf/etl_overrides.jobname.<jobname>.ksh)  |
+#                    12. (P) - Global Project override file          (<install dir>/conf/etl_overrides.project.<project>.ksh)  |
+#                    13. (B) - Global Branch override file           (<install dir>/conf/etl_overrides.branch.<branch>.ksh)    |
+#                    14. (S) - Global System level override file     (<install dir>/conf/etl_overrides.system.<system>.ksh)   _|_
+#                    15. (H) - Global Host level override file       (<install dir>/conf/etl_overrides.host.<host>.ksh)       \ /
+#                    16. (*) - Default values                                                                                  V
+#
+# Parameters  : Type etl_wrapper.ksh --help
+#
+# To Do
+# --------------
+# Lock management     - release lock on interrupts etc
+# Lock management     - configurable user or environment specific locks, sleep times, attempts etc
+# Resource management - release resource on interrupts etc
+# Resource management - configurable user or environment specific locks, sleep times, attempts etc
+# Resource management - validation, check pool can have x number of units allocated
+# Validation          - Externalize all validation functions so users can modify them easily
+#
+#
+# Change History
+# --------------
+#
+# Date         Author             Version    Description
+# ------------ ------------------ ---------- ------------------------------------------------------------------------
+# 04/02/2012   Philip Bowditch    1.0        Initial Version
+# 20/01/2014   Philip Bowditch    1.1        Cleanup and added additional override file options
+# 18/02/2015   Philip Bowditch    1.2        Fixed minor bugs, added ssh/host support
+# 23/02/2015   Philip Bowditch    1.3        Added support for running multiple instances
+#--------------------------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------------------------
+#  Set up global error codes
+#--------------------------------------------------------------------------------------------------------------------
+
+EXIT_CODE_USAGE=1                                # Error in parameters or how the wrapper was called
+EXIT_CODE_BAD_INSTALLATION=2                     # Error in core installation e.g. missing scripts or libraries
+EXIT_CODE_FILE_DOES_NOT_EXIST=50                 # Include file given does not exist
+EXIT_CODE_NOT_A_FILE=51                          # Include file given is actually not a file or symbolic link
+EXIT_CODE_UNREADABLE_FILE=52                     # Include file given is not readable
+EXIT_CODE_PROGRAM_NOT_SUPPORTED=53               # The program is not supported by this script
+EXIT_CODE_INVALID_SCRIPT=54                      # Include file given has syntax errors
+EXIT_CODE_FAILED_SCRIPT=55                       # Include file given has errors executing
+EXIT_CODE_LOCK_RETRY_FAILURE=56                  # Could not obtain a lock
+EXIT_CODE_MISSING_DIRECTORY=57                   # An essential directory could not be found
+
+EXIT_CODE_INVALID_ETL_BASE_DIR=101               # ETL_BASE_DIR parameter is invalid
+EXIT_CODE_INVALID_ETL_BRANCH=102                 # ETL_BRANCH parameter is invalid
+EXIT_CODE_INVALID_ETL_DATE=103                   # ETL_DATE parameter is invalid
+EXIT_CODE_INVALID_ETL_EXECUTE=104                # ETL_EXECUTE parameter is invalid
+EXIT_CODE_INVALID_ETL_INSTANCE=105               # ETL_INSTANCE parameter is invalid
+EXIT_CODE_INVALID_ETL_JOBNAME=106                # ETL_JOBNAME parameter is invalid
+EXIT_CODE_INVALID_ETL_LOG=107                    # ETL_LOG parameter is invalid
+EXIT_CODE_INVALID_ETL_PROGRAM=108                # ETL_PROGRAM parameter is invalid
+EXIT_CODE_INVALID_ETL_PROJECT=109                # ETL_PROJECT parameter is invalid
+EXIT_CODE_INVALID_ETL_RECOVER=110                # ETL_RECOVER parameter is invalid
+EXIT_CODE_INVALID_ETL_REL_PATH=111               # ETL_REL_PATH parameter is invalid
+EXIT_CODE_INVALID_ETL_RESOURCE=112               # ETL_RESOURCE parameter is invalid
+EXIT_CODE_INVALID_ETL_RUN_SCRIPT=113             # ETL_RUN_SCRIPT parameter is invalid
+EXIT_CODE_INVALID_ETL_SYSTEM=114                 # ETL_SYSTEM parameter is invalid
+EXIT_CODE_INVALID_ETL_TRACKING=115               # ETL_TRACKING parameter is invalid
+EXIT_CODE_INVALID_ETL_USER=116                   # ETL_USER parameter is invalid
+EXIT_CODE_INVALID_ETL_VALIDATION_LEVEL=117       # ETL_VALIDATION_LEVEL parameter is invalid
+EXIT_CODE_INVALID_ETL_PRIORITY=118               # ETL_PRIORITY parameter is invalid
+EXIT_CODE_INVALID_ETL_HOST=119                   # ETL_HOST parameter is invalid
+
+# No error code for ETL_PARAMS as we cant validate it
+
+
+#--------------------------------------------------------------------------------------------------------------------
+#  Set up common functions
+#--------------------------------------------------------------------------------------------------------------------
+
+function usage
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function outputs the usage information detailing how to
+    #              call this script.
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    cat << EOF
+Usage:  ${PROGRAM} [<options> ... ] [[:::] <program parameters> ... ]
+
+   Where <options> consists of zero or more of the following overrides
+
+     ( -w | --ETL_JOBNAME          ) <name>                    - The high level unique id for this job
+     ( -m | --ETL_SYSTEM           ) <system>                  - The ETL subsystem to run under e.g. abinitio, datastage etc
+     ( -u | --ETL_USER             ) <username>                - The user to run the program under
+     ( -s | --ETL_HOST             ) <hostname>                - The host to run the program on
+     ( -d | --ETL_DATE             ) <date>                    - The date to use for default logging purposes
+     ( -c | --ETL_COMMENT          ) <comment>                 - A comment for possible log file enrichment
+     ( -t | --ETL_RUN_SCRIPT       ) <script>                  - The underlying script to use to run the program
+     ( -r | --ETL_REL_PATH         ) <relpath>                 - The relative path from the top of the sandbox structure to the project (not inclusive)
+     ( -n | --ETL_BRANCH           ) <branch>                  - The name of the branch at the root of the sandbox path
+     ( -l | --ETL_LOG              ) <logfile>                 - The name of the log file to output stdout and stderr messages to
+     ( -j | --ETL_PROJECT          ) <name>                    - The name of the Ab Initio project the program sits within
+     ( -g | --ETL_PROGRAM          ) <name>                    - The name of the script, plan, graph, pset to run
+     ( -b | --ETL_BASE_DIR         ) <path>                    - The path to the top level of the sandbox directory
+     ( -p | --ETL_PARAMS           ) <parameters>              - A string of parameters to directly pass to the underlying program
+     ( -t | --ETL_TRACKING         ) ( true | false )          - Determines whether to deposit tracking results
+     ( -o | --ETL_RECOVER          ) ( true | false )          - Determines whether to recover/restart a failed run or to start afresh
+     ( -e | --ETL_RESOURCE         ) <resourcename>            - The name of a resource to allocate itself before running
+     ( -v | --ETL_VALIDATION_LEVEL ) ( ABORT | WARN | IGNORE ) - What validation action to apply to graphs / scripts etc before running
+     ( -x | --ETL_EXECUTE          ) ( true | false )          - Determines whether to run the program
+     ( -y | --ETL_PRIORITY         ) <nice value>              - The increment to apply to the existing nice priority level
+     ( -i | --ETL_INSTANCE         ) <count>                   - The maximum number of concurrent runs of jobname at any one time
+     ( -f | --file                 ) <filename>                - Read and set parameters from a file
+     ( -h | --help                 )                           - Displays this help
+     ( -v | --version              )                           - Displays the version of the ${PROGRAM} script
+
+   <program parameters> are defined as the first parameter that is not a recognised option of this script OR any parameter
+   that follows the triple colon delimiter (:::), from this point all subsequent parameters are all passed directly to the
+   underlying program being called.
+
+   NOTE - The setting of any of these parameters at an environment variable level will take priority over passing
+          values on the command line.  This ensures that global configuration changes can be made simply in shell
+          profiles rather than having to change each command line specified in a scheduler or private script file.
+
+   Examples
+
+     1. The following will override the ETL_DATE to be passed dynamically on the command line and
+        BATCH_ID passed directly to the underlying plan as it is an unrecognised parameter definition
+
+          ${PROGRAM} --ETL_DATE "20101018" --BATCH_ID "4"
+
+
+     2. If ETL_DATE is a valid program argument (or if you just prefer the syntax) you can pass the ETL_DATE directly
+        using the following form (NOTE ETL_DATE from a wrapper perspective will not see a command line override but will
+        receive its value from the next best alternative according to the overrides precedence.  ETL_BRANCH as it is a known
+        parameter and because it occurs before the triple colon will be set correctly)
+
+          ${PROGRAM} --ETL_BRANCH "main" ::: --ETL_DATE "20101018" --BATCH_ID "4"
+
+
+     3. The following runs the program with its default settings however the user has overridden the command to run
+        as the etl_prod user, if this is not the current user the process will attempt to sudo before starting
+
+          ${PROGRAM} --ETL_USER "etl_prod"
+
+
+     4. The following runs the program with its default settings however the user has overridden the command to run
+        as the etl_prod user on the cecpvmlx001 server, if this is not the current server then the process will ssh
+        to the target (key based authentication) before executing
+
+          ${PROGRAM} --ETL_USER "etl_prod" --ETL_HOST "cecpvmlx001"
+
+
+     5. The following overrides the ETL_PROGRAM from its current definition to point at a hotfix program.
+        This allows quick temporary changes to the underlying code via configuration without the requirement
+        for involving third party teams in scheduling changes, waiting for code promotion and/or release cycle
+        delays.  It can also be used in testing environments for overriding default inputs or implementing
+        very simple bug fixes, ensuring testing progresses without having to formally wait a few hours or more
+        for developers to fix and unit/regression test the code, regenerate sample data etc.
+
+          ${PROGRAM} --ETL_PROGRAM "fixes/pos_ftp_files.mp"
+
+
+     6. The following example dynamically determines information from a configuration file, note how this file is
+        significantly simpler than implementing a full wrapper script per process and reduces chances for errors
+        and improves code re-use.
+        
+        Although passing parameters via ETL_PARAMS in a production environment is unusual it is however useful in
+        development or test environments where access to IDE tools or locking of code for simple parameter changes
+        during testing is discouraged.   
+        
+          ${PROGRAM} --f ./pos_ftp_files.params
+
+          # contents of ./pos_ftp_files.params
+          ETL_BASE_DIR="${HOME}/sandboxes"
+          ETL_BRANCH="test_branch"
+          ETL_REL_PATH="JP/POS"
+          ETL_PROJECT="pos_staging"
+          ETL_PROGRAM="mp/pos_ftp_files.mp"
+          ETL_PARAMS="-OUTPUT_DIRECTORY '/data/\$LOGICAL_RUN_DATE/my_file.dat'"
+EOF
+}
+
+function check_param_count
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function determines if the number of parameters passed to
+    #              it equals the first parameter (-1).  The script usage is
+    #              displayed if not before exiting	
+    #
+    # Parameters : 1 - The number of minimum expected parameters
+    #              * - The parameters to count
+    #-----------------------------------------------------------------------------
+
+    COUNT="${1:-0}"
+    shift
+
+    if [[ "${#}" -lt "${COUNT}" ]]
+    then
+        usage >&2
+        exit ${EXIT_CODE_USAGE}
+    fi
+}
+
+function set_logfile_name
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function renames an existing logfile so that it has an
+    #              extension that reflects the jobs underlying status.  
+    #
+    # Parameters : 1 - The log file to rename
+    #              2 - The status to set the new extension to
+    # Returns    : 0 on successful rename
+    #-----------------------------------------------------------------------------
+
+    # Do not try to move if we are pointing to this special trash file
+    if [[ -z "$1" || "$1" == "/dev/null" ]]; then
+        return
+    fi
+
+    # Check file exists
+    if [[ ! -e "$1" ]]
+    then
+        return 1
+    fi
+
+    # Check is a file
+    if [[ ! -f "$1" && ! -L "$1" ]]
+    then
+        return 1
+    fi
+
+    FINAL_STATUS="$2"
+
+    # Try to remove all known suffixes so we get a file with no extra extension
+    NEW_LOG="$1"
+    NEW_LOG=$(basename "${NEW_LOG}" .initialising)
+    NEW_LOG=$(basename "${NEW_LOG}" .running)
+    NEW_LOG=$(basename "${NEW_LOG}" .error)
+    NEW_LOG=$(basename "${NEW_LOG}" .interrupted)
+    NEW_LOG=$(basename "${NEW_LOG}" .quit)
+    NEW_LOG=$(basename "${NEW_LOG}" .hangup)
+    NEW_LOG=$(basename "${NEW_LOG}" .terminated)
+    NEW_LOG=$(basename "${NEW_LOG}" .completed)
+    LOG_DIR=$(dirname  "${ETL_LOG}")
+
+    NEW_ETL_LOG="${LOG_DIR}/${NEW_LOG}"
+
+    # Check that we do not overwrite an existing file
+    if [[ -e "${NEW_ETL_LOG}" ]]
+    then
+        return 1
+    fi
+
+    # Check a new status was given and if so normalize / lowercase it for the filename
+    if [[ -n "${FINAL_STATUS}" ]]; then
+        NEW_EXT=$(echo -n "${FINAL_STATUS}" | tr '[A-Z]' '[a-z]')
+        NEW_ETL_LOG="${NEW_ETL_LOG}.${NEW_EXT}"
+    fi
+
+    # Rename the file with an extension that matches the current status
+    mv "${1}" "${NEW_ETL_LOG}"
+}
+
+function validate_etl_base_dir
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_BASE_DIR variable. To be valid the path
+    #              must be an existing directory.  The script exits with an error
+    #              message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_BASE_DIR="${1}"
+    
+    # TODO - Check directory is readable + executable (for listing)
+
+    if [[ -n "${ETL_BASE_DIR}" && ! -d "${ETL_BASE_DIR}" ]]
+    then
+        log_error "VALIDATE" "ETL_BASE_DIR is not a valid directory"
+        exit ${EXIT_CODE_INVALID_ETL_BASE_DIR}
+    fi
+}
+
+function validate_etl_comment
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_COMMENT variable. The script exits with an
+    #              if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_COMMENT="${1}"
+}
+
+function validate_etl_branch
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_BRANCH variable. To be valid the branch
+    #              can be blank or must consist only of alphanumeric characters.
+    #              The script exits with an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_BRANCH="${1}"
+    
+    if [[ -n "${ETL_BRANCH}" ]]
+    then
+        # Remove all non alphanumeric characters and underscores, whats left will be invalid
+        # Note turn off echo adding a newline to the end of the branch
+        TEMP_VAR=$(echo -n "${ETL_BRANCH}" | tr -d '[:alnum:]_\-\.')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_BRANCH contains non alphanumeric characters"
+            exit ${EXIT_CODE_INVALID_ETL_BRANCH}
+        fi
+    fi
+}
+
+function validate_etl_date
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_DATE variable. To be valid the date
+    #              must have a value consisting of alphanumeric, underscore,
+    #              colon, dashes or period characters.  The script exits with an
+    #              error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_DATE="${1}"
+    
+    if [[ -n "${ETL_DATE}" ]]
+    then
+        #TEMP_VAR=$(echo -n "${ETL_DATE}" | tr -d '[:alnum:]_\-\.:')
+        TEMP_VAR=$(echo -n "${ETL_DATE}" | tr -d '[:digit:]')
+
+        # TODO - Check century (and month/day ranges)
+        # TODO - Check length
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_DATE contains non numeric characters"
+            exit ${EXIT_CODE_INVALID_ETL_DATE}
+        fi
+    fi
+}
+
+function validate_etl_execute
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_EXECUTE variable. The script exits with
+    #              an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_EXECUTE="${1}"
+
+    case "${ETL_EXECUTE}" in
+        true | false ) ;;
+        *            ) log_error "VALIDATE" "ETL_EXECUTE has an unsupported value '${ETL_EXECUTE}'"
+                       exit ${EXIT_CODE_INVALID_ETL_EXECUTE}
+                       ;;
+    esac
+}
+
+function validate_etl_host
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_HOST variable. To be valid the hostname
+    #              must have a value consisting of alphanumeric characters.  The
+    #              script exits with an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_HOST="${1}"
+
+    if [[ -n "${ETL_HOST}" ]]
+    then
+        TEMP_VAR=$(echo -n "${ETL_HOST}" | tr -d '[:alnum:]\._')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_HOST contains non alphanumeric characters"
+            exit ${EXIT_CODE_INVALID_ETL_HOST}
+        fi
+    fi
+}
+
+function validate_etl_instance
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_INSTANCE variable. To be valid the number
+    #              must be 0 or greater
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_INSTANCE="${1}"
+    
+    if [[ -n "${ETL_INSTANCE}" ]]
+    then
+        TEMP_VAR=$(echo -n "${ETL_INSTANCE}" | tr -d '[:digit:]')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_INSTANCE is not a valid number"
+            exit ${EXIT_CODE_INVALID_ETL_INSTANCE}
+        fi
+
+        if [[ "${ETL_INSTANCE}" -lt 0 ]]
+        then
+            log_error "VALIDATE" "ETL_INSTANCE cannot be negative"
+            exit ${EXIT_CODE_INVALID_ETL_INSTANCE}
+        fi
+
+    fi
+}
+
+function validate_etl_jobname
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_JOBNAME variable. To be valid the jobname
+    #              must have a value consisting of alphanumeric characters.  The
+    #              script exits with an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_JOBNAME="${1}"
+    
+    if [[ -n "${ETL_JOBNAME}" ]]
+    then
+        TEMP_VAR=$(echo -n "${ETL_JOBNAME}" | tr -d '[:alnum:]_\-\.')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_JOBNAME contains non alphanumeric characters"
+            exit ${EXIT_CODE_INVALID_ETL_JOBNAME}
+        fi
+    fi
+}
+
+function validate_etl_log
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_LOG variable. To be valid the parent
+    #              directory must exist and the filename must contain alphanumeric,
+    #              underscore dashes or period characters [a-zA-Z0-9_-.].  The
+    #              script exits with an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_LOG="${1}"
+    
+    # No point validating /dev/null
+    if [[ -n "${ETL_LOG}" && "${ETL_LOG}" != "/dev/null" ]]
+    then
+        TEMP_VAR=$(dirname "${ETL_LOG}")
+
+        if [[ ! -d "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_LOG is to be created in an invalid directory"
+            exit ${EXIT_CODE_INVALID_ETL_LOG}
+        else
+            TEMP_VAR=$(echo -n "${ETL_LOG}" | tr -d '[:alnum:]_\-\./')
+
+            if [[ -n "${TEMP_VAR}" ]]
+            then
+                log_error "VALIDATE" "ETL_LOG contains invalid characters"
+                exit ${EXIT_CODE_INVALID_ETL_LOG}
+            else
+                touch "${ETL_LOG}" 2>/dev/null && rm "${ETL_LOG}" 2>/dev/null
+
+                if [[ $? -ne 0 ]]
+                then
+                    log_error "VALIDATE" "ETL_LOG could not be created"
+                    exit ${EXIT_CODE_INVALID_ETL_LOG}
+                fi
+            fi
+        fi
+    fi
+}
+
+function validate_etl_program
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_PROGRAM variable. To be valid the program
+    #              must have a value consisting of alphanumeric, underscore,
+    #              dashes or period characters.  The script exits with an
+    #              error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_PROGRAM="${1}"
+    
+    if [[ -z "${ETL_PROGRAM}" ]]
+    then
+        log_error "VALIDATE" "ETL_PROGRAM is not set"
+        exit ${EXIT_CODE_INVALID_ETL_PROGRAM}
+    else
+        TEMP_VAR=$(echo -n "${ETL_PROGRAM}" | tr -d '[:alnum:]_\-\./')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_PROGRAM contains invalid characters"
+            exit ${EXIT_CODE_INVALID_ETL_PROGRAM}
+        fi
+    fi
+}
+
+function validate_etl_system
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_SYSTEM variable. To be valid the program
+    #              must consist only of alphanumeric characters.  The script exits
+    #              with an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_SYSTEM="${1}"
+    
+    if [[ -n "${ETL_SYSTEM}" ]]
+    then
+        TEMP_VAR=$(echo "${ETL_SYSTEM}" | tr -d '[:alnum:]_\-\.')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_SYSTEM contains invalid characters"
+            exit ${EXIT_CODE_INVALID_ETL_SYSTEM}
+        fi
+    fi
+}
+
+function validate_etl_project
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_JOBNAME variable. To be valid the project
+    #              must have a value consisting of alphanumeric, underscore,
+    #              dashes or period characters [a-zA-Z0-9_-.].  The
+    #              script exits with an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_PROJECT="${1}"
+    
+    if [[ -n "${ETL_PROJECT}" ]]
+    then
+        TEMP_VAR=$(echo "${ETL_PROJECT}" | tr -d '[:alnum:]_\-\.')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_PROJECT contains invalid characters"
+            exit ${EXIT_CODE_INVALID_ETL_PROJECT}
+        fi
+    fi
+}
+
+function validate_etl_rel_path
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_REL_PATH variable. To be valid the path
+    #              must not be blank and must contain alphanumeric, underscores,
+    #              dashes and period characters only.  The script exits with an
+    #              error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_REL_PATH="${1}"
+    
+    if [[ -n "${ETL_REL_PATH}" ]]
+    then
+        TEMP_VAR=$(echo "${ETL_REL_PATH}" | tr -d '[:alnum:]_\-\./')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_REL_PATH contains invalid characters"
+            exit ${EXIT_CODE_INVALID_ETL_REL_PATH}
+        fi
+    fi
+}
+
+function validate_etl_recover
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_RECOVER variable. The script exits with
+    #              an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_RECOVER="${1}"
+
+    case "${ETL_RECOVER}" in
+        true | false ) ;;
+        *            ) log_error "VALIDATE" "ETL_RECOVER has an unsupported value '${ETL_RECOVER}'"
+                       exit ${EXIT_CODE_INVALID_ETL_RECOVER}
+                       ;;
+    esac
+}
+
+function validate_etl_resource
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_RESOURCE variable. To be valid the path
+    #              must not be blank and must contain alphanumeric, underscores,
+    #              dashes and period characters only.  The script exits with an
+    #              error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_RESOURCE="${1}"
+    
+    RESOURCE_COUNT="${#ETL_RESOURCE[*]}"
+
+    if [[ -n "${ETL_RESOURCE}" && "${RESOURCE_COUNT}" -gt 0 ]]
+    then
+
+        ii=0
+        while [[ "${ii}" -lt "${RESOURCE_COUNT}" ]]
+        do
+            TEMP_VAR=$(echo -n "${ETL_RESOURCE[$ii]}" | tr -d '[:alnum:]_\-\.=')
+
+            if [[ -n "${TEMP_VAR}" ]]
+            then
+                log_error "VALIDATE" "ETL_RESOURCE contains invalid characters at request [$ii] value '${ETL_RESOURCE[$ii]}'"
+                exit ${EXIT_CODE_INVALID_ETL_RESOURCE}
+            fi
+
+            # Extractthe resource name = resource value key value pair
+            RESOURCE=$(echo -n "${ETL_RESOURCE[$ii]}" | cut -d"=" -f1)
+            UNITS=$(   echo -n "${ETL_RESOURCE[$ii]}" | cut -d"=" -f2)
+
+            # Validate the name
+            TEMP_VAR=$(echo -n"${RESOURCE}" | tr -d '[:alnum:]_\-\.')
+
+            if [[ -n "${TEMP_VAR}" ]]
+            then
+                log_error "VALIDATE" "ETL_RESOURCE contains invalid characters at position [$ii] value '${RESOURCE}'"
+                exit ${EXIT_CODE_INVALID_ETL_RESOURCE}
+            fi
+			
+            # If no value is given then we set a default unit of 1
+            if [[ -n "${UNITS}" ]]
+            then
+              UNITS="1"
+            fi
+
+            # Validate the number of resources requested
+            TEMP_VAR=$(echo -n "${UNITS}" | tr -d '[:digit:]')
+
+            if [[ -n "${TEMP_VAR}" ]]
+            then
+                log_error "VALIDATE" "ETL_RESOURCE '${RESOURCE}' contains an invalid unit of value '${UNITS}'"
+                exit ${EXIT_CODE_INVALID_ETL_RESOURCE}
+            fi
+
+            # Cannot allocate 0 units, makes no sense
+            if [[ "${UNITS}" -le 0 ]]
+            then
+                log_error "VALIDATE" "ETL_RESOURCE '${RESOURCE}' contains an invalid unit of value '${UNITS}'"
+                exit ${EXIT_CODE_INVALID_ETL_RESOURCE}
+            fi
+
+            # Future change, check the pool can have this number of units allocated
+
+            ii=$(( ii + 1 ))
+        done
+
+    fi
+}
+
+function validate_etl_run_script
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_RUN_SCRIPT variable. To be valid the path
+    #              must not be blank and must contain alphanumeric, underscores,
+    #              dashes and period characters only.  It must be an existing
+    #              script that can be executed by the current user.  This script
+    #              exits with an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_RUN_SCRIPT="${1}"
+    
+    if [[ -z "${ETL_RUN_SCRIPT}" ]]
+    then
+        log_error "VALIDATE" "ETL_RUN_SCRIPT is not set and could not be determined"
+        exit ${EXIT_CODE_INVALID_ETL_RUN_SCRIPT}
+    else
+        TEMP_VAR=$(dirname "${ETL_RUN_SCRIPT}")
+
+        if [[ ! -d "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_RUN_SCRIPT points to an invalid directory"
+            exit ${EXIT_CODE_INVALID_ETL_RUN_SCRIPT}
+        elif [[ ! -f "${ETL_RUN_SCRIPT}" && ! -L "${ETL_RUN_SCRIPT}" ]]
+        then
+            log_error "VALIDATE" "ETL_RUN_SCRIPT does not exist"
+            exit ${EXIT_CODE_INVALID_ETL_RUN_SCRIPT}
+        elif [[ ! -x "${ETL_RUN_SCRIPT}" ]]
+        then
+            log_error "VALIDATE" "ETL_RUN_SCRIPT can not be executed"
+            exit ${EXIT_CODE_INVALID_ETL_RUN_SCRIPT}
+        elif [[ ! -r "${ETL_RUN_SCRIPT}" ]]
+        then
+            log_error "VALIDATE" "ETL_RUN_SCRIPT can not be read"
+            exit ${EXIT_CODE_INVALID_ETL_RUN_SCRIPT}
+        else
+            TEMP_VAR=$(echo -n "${ETL_RUN_SCRIPT}" | tr -d '[:alnum:]_\-\./')
+
+            if [[ -n "${TEMP_VAR}" ]]
+            then
+                log_error "VALIDATE" "ETL_RUN_SCRIPT contains invalid characters"
+                exit ${EXIT_CODE_INVALID_ETL_RUN_SCRIPT}
+            fi
+        fi
+    fi
+}
+
+function validate_etl_tracking
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_TRACKING variable. The script exits with
+    #              an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_TRACKING="${1}"
+
+    case "${ETL_TRACKING}" in
+        true | false ) ;;
+        *            ) log_error "VALIDATE" "ETL_TRACKING has an unsupported value '${ETL_TRACKING}'"
+                       exit ${EXIT_CODE_INVALID_ETL_TRACKING}
+                       ;;
+    esac
+}
+
+function validate_etl_user
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_USER variable. To be valid the user
+    #              must have a value consisting of alphanumeric characters.  The
+    #              script exits with an error message if found invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_USER="${1}"
+
+    if [[ -n "${ETL_USER}" ]]
+    then
+        TEMP_VAR=$(echo -n "${ETL_USER}" | tr -d '[:alnum:]_')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_USER contains non alphanumeric characters"
+            exit ${EXIT_CODE_INVALID_ETL_USER}
+        fi
+    fi
+}
+
+function validate_etl_validation_level
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_VALIDATION_LEVEL variable. To be valid the
+    #              variable must be one of the following values ABORT, WARN or
+    #              IGNORE.  The script exits with an error message if found
+    #              invalid.  
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_VALIDATION_LEVEL="${1}"
+
+    case "${ETL_VALIDATION_LEVEL}" in
+        ABORT | WARN | IGNORE ) ;;
+        *                     ) log_error "VALIDATE" "ETL_VALIDATION_LEVEL has an unsupported value '${ETL_VALIDATION_LEVEL}'"
+                                exit ${EXIT_CODE_INVALID_ETL_VALIDATION_LEVEL}
+                                ;;
+    esac
+}
+
+function validate_etl_include_file
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be loaded
+    #              and executed as a ksh script.  
+    #
+    # Parameters : 1 - The file to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    # Convert relative to absolute path
+    ETL_INCLUDE_FILE=$(check_relative_path "$1")
+
+    if [[ ! -e "$ETL_INCLUDE_FILE" ]]
+    then
+        log_error "VALIDATE" "File '$ETL_INCLUDE_FILE' does not exist"
+        exit ${EXIT_CODE_FILE_DOES_NOT_EXIST}
+    fi
+    if [[ ! -f "$ETL_INCLUDE_FILE" && ! -L "$ETL_INCLUDE_FILE" ]]
+    then
+        log_error "VALIDATE" "File '$ETL_INCLUDE_FILE' is not a regular file"
+        exit ${EXIT_CODE_NOT_A_FILE}
+    fi
+    if [[ ! -r "$ETL_INCLUDE_FILE" ]]
+    then
+        log_error "VALIDATE" "File '$ETL_INCLUDE_FILE' is not readable"
+        exit ${EXIT_CODE_UNREADABLE_FILE}
+    fi
+
+    # Use inbuilt korn shell validation
+    ksh -n "$ETL_INCLUDE_FILE"
+    if [[ $? -ne 0 ]]
+    then
+        log_error "VALIDATE" "File '$ETL_INCLUDE_FILE' is not a valid korn shell script"
+        exit ${EXIT_CODE_INVALID_SCRIPT}
+    fi
+}
+
+function validate_etl_priority
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function validates the parameter passed can be assigned
+    #              correctly to the ETL_PRIORITY variable. To be valid the number
+    #              must be between the range -20 to 19
+    #
+    # Parameters : 1 - The value to validate
+    # Returns    : stderr    - An error message if parameter is invalid
+    #              errorcode - 0 if valid
+    #-----------------------------------------------------------------------------
+
+    ETL_PRIORITY="${1}"
+    
+    if [[ -n "${ETL_PRIORITY}" ]]
+    then
+        TEMP_VAR=$(echo -n "${ETL_PRIORITY}" | tr -d '[:digit:]')
+
+        if [[ -n "${TEMP_VAR}" ]]
+        then
+            log_error "VALIDATE" "ETL_PRIORITY is not a valid number"
+            exit ${EXIT_CODE_INVALID_ETL_PRIORITY}
+        fi
+
+        if [[ "${ETL_PRIORITY}" -gt 19 ]]
+        then
+            log_error "VALIDATE" "ETL_PRIORITY cannot exceed 19"
+            exit ${EXIT_CODE_INVALID_ETL_PRIORITY}
+        fi
+
+        if [[ "${ETL_PRIORITY}" -lt -20 ]]
+        then
+            log_error "VALIDATE" "ETL_PRIORITY cannot drop below 20"
+            exit ${EXIT_CODE_INVALID_ETL_PRIORITY}
+        fi
+    fi
+}
+
+function load_validation_scripts
+{
+    #-----------------------------------------------------------------------------
+    # Details    : A utility to run/source an external file.  It is assumed this
+    #              file may export ETL_* variables and so overriding the defaults
+    #              already in the users environment.  The variables are therefore
+    #              maintained during this include.  
+    #
+    #              This function exits if the file could not sourced correctly
+    #
+    # Parameters : 1 - The file to include/source
+    #              2 - A single character type indicator representing the include
+    #                  source
+    #-----------------------------------------------------------------------------
+
+    for FILE in $(ls -1 ${PROGRAM_DIR}/validate/etl_validate.*.ksh ${HOME}/.etl/etl_validate.*.ksh ${PROGRAM_DIR}/validate/etl_validate.ksh ${HOME}/.etl/etl_validate.ksh 2>/dev/null)
+    do
+
+        # Ignore directory's or block devices etc
+        if [[ -f "${FILE}" || -L "${FILE}" ]]; then
+
+            ksh -n "${FILE}"
+            if [[ $? -ne 0 ]]; then
+                log_error "VALIDATION" "File '${FILE}' is invalid"
+                exit ${EXIT_CODE_FAILED_SCRIPT}
+            fi
+
+            ERR_MSG=$("${FILE}" >/dev/null &2>&1)
+            if [[ $? -ne 0 ]]; then
+                log_error "VALIDATION" "File '${FILE}' failed and could not be sourced"
+                exit ${EXIT_CODE_FAILED_SCRIPT}
+            fi
+
+        fi
+
+    done
+}
+
+function reset_variables
+{
+    #-----------------------------------------------------------------------------
+    # Details    : Resets the internally used global variables used by this script
+    #              this is useful to ensure if named in the user environment their
+    #              values aren't mistakenly seen by this script.
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    unset SAVED_ETL_BASE_DIR            WHEREIS_ETL_BASE_DIR    \
+          SAVED_ETL_BRANCH              WHEREIS_ETL_BRANCH      \
+          SAVED_ETL_COMMENT             WHEREIS_ETL_COMMENT     \
+          SAVED_ETL_DATE                WHEREIS_ETL_DATE        \
+          SAVED_ETL_EXECUTE             WHEREIS_ETL_EXECUTE     \
+          SAVED_ETL_HOST                WHEREIS_ETL_HOST        \
+          SAVED_ETL_INSTANCE            WHEREIS_ETL_INSTANCE    \
+          SAVED_ETL_JOBNAME             WHEREIS_ETL_JOBNAME     \
+          SAVED_ETL_LOG                 WHEREIS_ETL_LOG         \
+          SAVED_ETL_PARAMS              WHEREIS_ETL_PARAMS      \
+          SAVED_ETL_PRIORITY            WHEREIS_ETL_PRIORITY    \
+          SAVED_ETL_PROJECT             WHEREIS_ETL_PROJECT     \
+          SAVED_ETL_PROGRAM             WHEREIS_ETL_PROGRAM     \
+          SAVED_ETL_RESOURCE            WHEREIS_ETL_RESOURCE    \
+          SAVED_ETL_RECOVER             WHEREIS_ETL_RECOVER     \
+          SAVED_ETL_REL_PATH            WHEREIS_ETL_REL_PATH    \
+          SAVED_ETL_RUN_SCRIPT          WHEREIS_ETL_RUN_SCRIPT  \
+          SAVED_ETL_SYSTEM              WHEREIS_ETL_SYSTEM      \
+          SAVED_ETL_TRACKING            WHEREIS_ETL_TRACKING    \
+          SAVED_ETL_USER                WHEREIS_ETL_USER        \
+          SAVED_ETL_VALIDATION_LEVEL    WHEREIS_ETL_VALIDATION_LEVEL
+}
+
+function save_variables
+{
+    #-----------------------------------------------------------------------------
+    # Details    : Saves the ETL_* variables to a SAVED_ETL_* value.  This is used
+    #              so the script can determine if any exports/overrides are performed
+    #              before and after running an external script
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    SAVED_ETL_BASE_DIR="${ETL_BASE_DIR}"
+    SAVED_ETL_BRANCH="${ETL_BRANCH}"
+    SAVED_ETL_COMMENT="${ETL_COMMENT}"
+    SAVED_ETL_DATE="${ETL_DATE}"
+    SAVED_ETL_EXECUTE="${ETL_EXECUTE}"
+    SAVED_ETL_HOST="${ETL_HOST}"
+    SAVED_ETL_INSTANCE="${ETL_INSTANCE}"
+    SAVED_ETL_JOBNAME="${ETL_JOBNAME}"
+    SAVED_ETL_LOG="${ETL_LOG}"
+    SAVED_ETL_PRIORITY="${ETL_PRIORITY}"
+    SAVED_ETL_PROJECT="${ETL_PROJECT}"
+    SAVED_ETL_PROGRAM="${ETL_PROGRAM}"
+    SAVED_ETL_RECOVER="${ETL_RECOVER}"
+    SAVED_ETL_REL_PATH="${ETL_REL_PATH}"
+    SAVED_ETL_RUN_SCRIPT="${ETL_RUN_SCRIPT}"
+    SAVED_ETL_SYSTEM="${ETL_SYSTEM}"
+    SAVED_ETL_TRACKING="${ETL_TRACKING}"
+    SAVED_ETL_USER="${ETL_USER}"
+    SAVED_ETL_VALIDATION_LEVEL="${ETL_VALIDATION_LEVEL}"
+
+    # -- ensures the next argument is not interpreted as an option if it starts with -
+    set -A SAVED_ETL_PARAMS -- "${ETL_PARAMS[@]}"
+    set -A SAVED_ETL_RESOURCE -- "${ETL_RESOURCE[@]}"
+}
+
+function set_variable_locators
+{
+    #-----------------------------------------------------------------------------
+    # Details    : Maintains the WHEREIS_ETL_* variables to ensure they consistently
+    #              point to the location the ETL_* value was spotted.  This should be
+    #              called after a call to save_variables and after any change to the
+    #              ETL_* variables
+    #
+    # Parameters : 1 - The single letter indicator used to represent where the ETL_*
+    #                  parameters have just been loaded from
+    #-----------------------------------------------------------------------------
+
+    TYPE_INDICATOR="$1"
+
+    if [[ "${ETL_BASE_DIR}"         != "${SAVED_ETL_BASE_DIR}"         ]]; then WHEREIS_ETL_BASE_DIR="${TYPE_INDICATOR}";         fi
+    if [[ "${ETL_BRANCH}"           != "${SAVED_ETL_BRANCH}"           ]]; then WHEREIS_ETL_BRANCH="${TYPE_INDICATOR}";           fi
+    if [[ "${ETL_COMMENT}"          != "${SAVED_ETL_COMMENT}"          ]]; then WHEREIS_ETL_COMMENT="${TYPE_INDICATOR}";          fi
+    if [[ "${ETL_DATE}"             != "${SAVED_ETL_DATE}"             ]]; then WHEREIS_ETL_DATE="${TYPE_INDICATOR}";             fi
+    if [[ "${ETL_EXECUTE}"          != "${SAVED_ETL_EXECUTE}"          ]]; then WHEREIS_ETL_EXECUTE="${TYPE_INDICATOR}";          fi
+    if [[ "${ETL_HOST}"             != "${SAVED_ETL_HOST}"             ]]; then WHEREIS_ETL_HOST="${TYPE_INDICATOR}";             fi
+    if [[ "${ETL_INSTANCE}"         != "${SAVED_ETL_INSTANCE}"         ]]; then WHEREIS_ETL_INSTANCE="${TYPE_INDICATOR}";         fi
+    if [[ "${ETL_JOBNAME}"          != "${SAVED_ETL_JOBNAME}"          ]]; then WHEREIS_ETL_JOBNAME="${TYPE_INDICATOR}";          fi
+    if [[ "${ETL_LOG}"              != "${SAVED_ETL_LOG}"              ]]; then WHEREIS_ETL_LOG="${TYPE_INDICATOR}";              fi
+    if [[ "${ETL_PARAMS[@]}"        != "${SAVED_ETL_PARAMS[@]}"        ]]; then WHEREIS_ETL_PARAMS="${TYPE_INDICATOR}";           fi
+    if [[ "${ETL_PRIORITY}"         != "${SAVED_ETL_PRIORITY}"         ]]; then WHEREIS_ETL_PRIORITY="${TYPE_INDICATOR}";         fi
+    if [[ "${ETL_PROJECT}"          != "${SAVED_ETL_PROJECT}"          ]]; then WHEREIS_ETL_PROJECT="${TYPE_INDICATOR}";          fi
+    if [[ "${ETL_PROGRAM}"          != "${SAVED_ETL_PROGRAM}"          ]]; then WHEREIS_ETL_PROGRAM="${TYPE_INDICATOR}";          fi
+    if [[ "${ETL_RECOVER}"          != "${SAVED_ETL_RECOVER}"          ]]; then WHEREIS_ETL_RECOVER="${TYPE_INDICATOR}";          fi
+    if [[ "${ETL_REL_PATH}"         != "${SAVED_ETL_REL_PATH}"         ]]; then WHEREIS_ETL_REL_PATH="${TYPE_INDICATOR}";         fi
+    if [[ "${ETL_RESOURCE[@]}"      != "${SAVED_ETL_RESOURCE[@]}"      ]]; then WHEREIS_ETL_RESOURCE="${TYPE_INDICATOR}";         fi
+    if [[ "${ETL_RUN_SCRIPT}"       != "${SAVED_ETL_RUN_SCRIPT}"       ]]; then WHEREIS_ETL_RUN_SCRIPT="${TYPE_INDICATOR}";       fi
+    if [[ "${ETL_SYSTEM}"           != "${SAVED_ETL_SYSTEM}"           ]]; then WHEREIS_ETL_SYSTEM="${TYPE_INDICATOR}";           fi
+    if [[ "${ETL_TRACKING}"         != "${SAVED_ETL_TRACKING}"         ]]; then WHEREIS_ETL_TRACKING="${TYPE_INDICATOR}";         fi
+    if [[ "${ETL_USER}"             != "${SAVED_ETL_USER}"             ]]; then WHEREIS_ETL_USER="${TYPE_INDICATOR}";             fi
+    if [[ "${ETL_VALIDATION_LEVEL}" != "${SAVED_ETL_VALIDATION_LEVEL}" ]]; then WHEREIS_ETL_VALIDATION_LEVEL="${TYPE_INDICATOR}"; fi
+}
+
+function load_from_file
+{
+    #-----------------------------------------------------------------------------
+    # Details    : A utility to run/source an external file.  It is assumed this
+    #              file may export ETL_* variables and so overriding the defaults
+    #              already in the users environment.  The variables are therefore
+    #              maintained during this include.  
+    #
+    #              This function exits if the file could not be sourced correctly
+    #
+    # Parameters : 1 - The file to include/source
+    #              2 - A single character type indicator representing the include
+    #                  source
+    #-----------------------------------------------------------------------------
+
+    OVERRIDES_FILE="$1"
+    TYPE_INDICATOR="$2"
+
+    validate_etl_include_file "${OVERRIDES_FILE}"
+
+    save_variables
+
+    . "${OVERRIDES_FILE}"
+    if [[ $? -ne 0 ]]
+    then
+        log_error "OVERRIDES" "File '${OVERRIDES_FILE}' failed and could not be sourced"
+        exit ${EXIT_CODE_FAILED_SCRIPT}
+    fi
+
+    set_variable_locators "${TYPE_INDICATOR}"
+}
+
+function load_user_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : Each user may specify their own local etl overrides file in 
+    #              their home directory.  It is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    OVERRIDES_FILE="${HOME}/.etl/etl_overrides.ksh"
+
+    if [[ -e "${OVERRIDES_FILE}" ]]
+    then
+        log_info "OVERRIDES" "User overrides found, running '${OVERRIDES_FILE}'"
+
+        load_from_file "${OVERRIDES_FILE}" "${INDICATOR_USER}"
+    fi
+}
+
+function load_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : A simple alternative to allow a single global override file.
+    #              It is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    OVERRIDES_FILE="${PROGRAM_DIR}/conf/etl_overrides.ksh"
+
+    if [[ -e "${OVERRIDES_FILE}" ]]
+    then
+        log_info "OVERRIDES" "Global overrides found, running '${OVERRIDES_FILE}'"
+
+        load_from_file "${OVERRIDES_FILE}" "${INDICATOR_GLOBAL}"
+    fi
+}
+
+function load_user_jobname_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_JOBNAME
+    #              this allows specific configuration values to be defined for a
+    #              specific job.  This file is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_JOBNAME}" ]]
+    then
+        OVERRIDES_FILE="${HOME}/.etl/etl_overrides.jobname.${ETL_JOBNAME}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "User Jobname overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_UJOBNAME}"
+        fi
+    fi
+}
+
+function load_user_branch_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_BRANCH
+    #              this allows specific configuration values to be defined for
+    #              development, test, release etc.  This file is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_BRANCH}" ]]
+    then
+        OVERRIDES_FILE="${HOME}/.etl/etl_overrides.branch.${ETL_BRANCH}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "User Branch overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_UBRANCH}"
+        fi
+    fi
+}
+
+function load_user_project_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_PROJECT
+    #              this allows specific configuration values to be defined for a
+    #              specific application.  This file is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_PROJECT}" ]]
+    then
+        OVERRIDES_FILE="${HOME}/.etl/etl_overrides.project.${ETL_PROJECT}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "User Project overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_UPROJECT}"
+        fi
+    fi
+}
+
+function load_user_system_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_SYSTEM
+    #              this allows specific configuration values to be defined for a
+    #              specific system.  For example changing the logging path if running
+    #              an ab initio job or running informatica etc.  This file is
+    #              executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_SYSTEM}" ]]
+    then
+        OVERRIDES_FILE="${HOME}/.etl/etl_overrides.system.${ETL_SYSTEM}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "User System overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_USYSTEM}"
+        fi
+    fi
+}
+
+function load_user_host_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_HOST
+    #              this allows specific configuration values to be defined for a
+    #              specific server.  For example changing the logging path if running
+    #              on a different server etc.  This file is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_HOST}" ]]
+    then
+        OVERRIDES_FILE="${HOME}/.etl/etl_overrides.host.${ETL_HOST}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "User Host overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_UHOST}"
+        fi
+    fi
+}
+
+function load_jobname_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_JOBNAME
+    #              this allows specific configuration values to be defined for a
+    #              specific job.  This file is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_JOBNAME}" ]]
+    then
+        OVERRIDES_FILE="${PROGRAM_DIR}/conf/etl_overrides.jobname.${ETL_JOBNAME}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "Jobname overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_JOBNAME}"
+        fi
+    fi
+}
+
+function load_branch_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_BRANCH
+    #              this allows specific configuration values to be defined for
+    #              development, test, release etc.  This file is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_BRANCH}" ]]
+    then
+        OVERRIDES_FILE="${PROGRAM_DIR}/conf/etl_overrides.branch.${ETL_BRANCH}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "Branch overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_BRANCH}"
+        fi
+    fi
+}
+
+function load_project_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_PROJECT
+    #              this allows specific configuration values to be defined for a
+    #              specific application.  This file is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_PROJECT}" ]]
+    then
+        OVERRIDES_FILE="${PROGRAM_DIR}/conf/etl_overrides.project.${ETL_PROJECT}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "Project overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_PROJECT}"
+        fi
+    fi
+}
+
+function load_system_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_SYSTEM
+    #              this allows specific configuration values to be defined for a
+    #              specific system.  For example changing the logging path if running
+    #              an ab initio job or running informatica etc.  This file is
+    #              executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_SYSTEM}" ]]
+    then
+        OVERRIDES_FILE="${PROGRAM_DIR}/conf/etl_overrides.system.${ETL_SYSTEM}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "System overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_SYSTEM}"
+        fi
+    fi
+}
+
+function load_host_overrides
+{
+    #-----------------------------------------------------------------------------
+    # Details    : An overrides script can be defined for a specific ETL_HOST
+    #              this allows specific configuration values to be defined for a
+    #              specific server.  For example changing the logging path if running
+    #              on a different host etc.  This file is executed if found
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    if [[ -n "${ETL_HOST}" ]]
+    then
+        OVERRIDES_FILE="${PROGRAM_DIR}/conf/etl_overrides.host.${ETL_HOST}.ksh"
+
+        if [[ -e "${OVERRIDES_FILE}" ]]
+        then
+            log_info "OVERRIDES" "Host overrides found, running '${OVERRIDES_FILE}'"
+
+            load_from_file "${OVERRIDES_FILE}" "${INDICATOR_HOST}"
+        fi
+    fi
+}
+
+function load_defaults
+{
+    #-----------------------------------------------------------------------------
+    # Details    : To ensure this script is configured correctly set key variable
+    #              values to defaults if they have not already been set somewhere
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    # Ensure all variables are saved with indicators before we start defining defaults ourselves
+    save_variables
+
+    DT=$(date "+%Y%m%d%H%M%S")
+
+    export ETL_HOST=${ETL_HOST:-$CURRENT_HOST_SHORT}                                       # Set host to this host
+    export ETL_INSTANCE=${ETL_INSTANCE:-1}                                                 # Run 1 instance at a time
+    export ETL_PRIORITY=${ETL_PRIORITY:-10}                                                # set job priority
+    export ETL_DATE=${ETL_DATE:-$DT}                                                       # set date
+    export ETL_USER=${ETL_USER:-"${CURRENT_USER}"}                                         # set user id to run as
+    export ETL_TRACKING=${ETL_TRACKING:-false}                                             # set tracking to off
+    export ETL_EXECUTE=${ETL_EXECUTE:-true}                                                # set execution to on
+    export ETL_RECOVER=${ETL_RECOVER:-true}                                                # set job recovery to on
+    export ETL_VALIDATION_LEVEL=${ETL_VALIDATION_LEVEL:-IGNORE}                            # set validation to off
+    export ETL_RUN_SCRIPT=${ETL_RUN_SCRIPT:-"${PROGRAM_DIR}/${ETL_SYSTEM}_wrapper.ksh"}    # set location of run program script
+
+    set_variable_locators "${INDICATOR_DEFAULT}"
+}
+
+function init_work_dir
+{
+    #-----------------------------------------------------------------------------
+    # Details    : To ensure this script is configured correctly set key variable
+    #              values to defaults if they have not already been set somewhere
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    export ETL_ID=0                 # Global id for all jobs by this user
+    export ETL_BATCH_ID=0           # Unique id per jobname for this user
+
+    # Setup the directory that will hold saved ids
+    ID_DIR=$(dirname "${PROGRAM_DIR}")/var/id/
+    ID_FILE="${ID_DIR}/id.${CURRENT_USER}"
+    USERNAME="${CURRENT_USER}"
+    SLEEP_TIME=3         # Retry every 3 seconds by default
+    ATTEMPTS=20          # Try 20 times (for every 3 seconds this works out to be a minute)
+
+    # Go through all options
+    while [[ $# -gt 0 ]]
+    do
+
+        case "$1" in
+
+            --id       ) ETL_ID="$2";       shift 2
+                         ;;
+            --batch_id ) ETL_BATCH_ID="$2"; shift 2
+                         ;;
+            --user     ) USERNAME="$2";     shift 2
+                         ;;
+            --idpath   ) ID_FILE="$2";      shift 2
+                         ID_DIR=$(dirname "${ID_FILE}")
+                         ;;
+            --sleep    ) SLEEP_TIME="$2";   shift 2
+                         ;;
+            --attempts ) ATTEMPTS="$2";     shift 2
+                         ;;
+
+        esac
+
+    done
+
+    # Ensure id directory exists, this is more of an admin thing, as this is a user level script we fail rather than try to create it
+    if [[ ! -d "${ID_DIR}" ]]
+    then
+        log_error "INITIALISING" "The id directory does not exist '${ID_DIR}'"
+        exit ${EXIT_CODE_MISSING_DIRECTORY}
+    fi
+
+    # Attempt to perform a global lock, try every 6 seconds for a minute, if we cant grab an id in that time something is going wrong
+    # as it indicates a lot of jobs are kicking off for this user
+    resource_request --sleep "${SLEEP_TIME}" --attempts "${ATTEMPTS}" --user "${USERNAME}" id=1
+
+        GLOBAL_ID_FILE="${ID_FILE}.data"
+        JOB_ID_FILE="${ID_FILE}.${ETL_JOBNAME}.data"
+
+        # Read and increment id's
+        ETL_ID=$(      tail -1 "${GLOBAL_ID_FILE}" 2>/dev/null | cut -d\| -f4 | cut -d= -f2)
+        ETL_BATCH_ID=$(tail -1 "${JOB_ID_FILE}"    2>/dev/null | cut -d\| -f5 | cut -d= -f2)
+
+        export ETL_ID=$((       ETL_ID       + 1 ))
+        export ETL_BATCH_ID=$(( ETL_BATCH_ID + 1 ))
+
+        # Write new ID's, write all to global id file/log, write more information but to specific jobname id files
+        echo -e "DATE=${DT}|PID=$$|USER=${CURRENT_USER}|ETL_ID=${ETL_ID}|ETL_BATCH_ID=${ETL_BATCH_ID}|ETL_JOBNAME=${ETL_JOBNAME}"                                                                    >> "${GLOBAL_ID_FILE}"
+        echo -e "DATE=${DT}|PID=$$|USER=${CURRENT_USER}|ETL_ID=${ETL_ID}|ETL_BATCH_ID=${ETL_BATCH_ID}|ETL_JOBNAME=${ETL_JOBNAME}|ETL_USER=${ETL_USER}|ETL_PROJECT=${ETL_PROJECT}|ETL_LOG=${ETL_LOG}" >> "${JOB_ID_FILE}"
+
+    resource_release --sleep "${SLEEP_TIME}" --attempts "${ATTEMPTS}" --user "${USERNAME}" id=1
+}
+
+function run_program
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function runs the actual program specified by all the
+    #              ETL_ environment variables
+    #
+    # Parameters : None
+    # Returns    : 0 on success else failure
+    #-----------------------------------------------------------------------------
+
+    i = 0
+    while [[ $i -lt "${#ETL_PARAMS[@]}" ]]
+    do
+        ETL_PARAMS[$i]=$(echo -n "${ETL_PARAMS[$i]}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+        i=$(( i + 1 ))
+    done
+
+    #i = 0
+    #while [[ $i -lt "${#ETL_RESOURCE[@]}" ]]
+    #do
+    #    ETL_RESOURCE[$i]=$(echo -n "${ETL_RESOURCE[$i]}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    #    i=$(( i + 1 ))
+    #done
+
+    # Replace etl instance id in a few key parameters (should probably do all at some point)
+    ETL_BASE_DIR=$(  echo -n "${ETL_BASE_DIR}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_BRANCH=$(    echo -n "${ETL_BRANCH}"     | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_COMMENT=$(   echo -n "${ETL_COMMENT}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_DATE=$(      echo -n "${ETL_DATE}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_EXECUTE=$(   echo -n "${ETL_EXECUTE}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_HOST=$(      echo -n "${ETL_HOST}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_JOBNAME=$(   echo -n "${ETL_JOBNAME}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_PRIORITY=$(  echo -n "${ETL_PRIORITY}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_PROGRAM=$(   echo -n "${ETL_PROGRAM}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_PROJECT=$(   echo -n "${ETL_PROJECT}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_RECOVER=$(   echo -n "${ETL_RECOVER}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_REL_PATH=$(  echo -n "${ETL_REL_PATH}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_RUN_SCRIPT=$(echo -n "${ETL_RUN_SCRIPT}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_SYSTEM=$(    echo -n "${ETL_SYSTEM}"     | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_TRACKING=$(  echo -n "${ETL_TRACKING}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_USER=$(      echo -n "${ETL_USER}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    
+    # Maybe overkill but an extra few overrides just for logging
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%PID%|$$|g")
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%PPID%|$PPID|g")
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%HOST%|$CURRENT_HOST_SHORT|g")
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%HOSTNAME%|$CURRENT_HOST_LONG|g")
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%IP%|$CURRENT_HOST_IP|g")
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%USER%|$CURRENT_USER|g")
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%GROUP%|$CURRENT_GROUP|g")
+    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%VERSION%|$VERSION|g")
+
+    # Setup a listener to log all output from this script from this point forwards, as a benefit this listener outputs
+    # to screen as well as a file. It works like this:
+    # Save a reference to stdout to file descriptor 3.  tee will output to a file as well as to stdout but we make it
+    # go to this new copy as we will be re-directing the default stdout for all following processes.
+    TEMP_LOG="${ETL_LOG:-/dev/null}"
+    if [[ -n "${ETL_LOG}" && "${ETL_LOG}" != "/dev/null" ]]
+    then
+        TEMP_LOG="${ETL_LOG}.running"
+    fi
+
+
+    #exec 3>&1
+    #tee -a "${TEMP_LOG}" >&3 |&
+    #ETL_COPROCESS_ID=$!
+    #exec >&p 2>&1
+
+    # Slightly uglier method than using the above coprocess approach however it is far more supported
+    temp_pipe="/tmp/$CURRENT_USER.$$.$PPID.$ETL_DATE.$ETL_INSTANCE_ID.pipe"
+    mkfifo "$temp_pipe"
+    tee -a "${TEMP_LOG}" < "$temp_pipe" &
+    exec >"$temp_pipe" 2>"$temp_pipe"
+
+
+    #trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "ERROR"       "The command failed execution"; set_logfile_name "${ETL_LOG}.running" ERROR;       return ${ERR_CODE}' ERR
+    trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "HANGUP"      "The HUP signal was received"; set_logfile_name "${ETL_LOG}.running" HANGUP;      return ${ERR_CODE}' HUP
+    trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "INTERRUPTED" "The INT signal was received, typically this occurs due to the use of control-c"; set_logfile_name "${ETL_LOG}.running"   INTERRUPTED; return ${ERR_CODE}' INT
+    trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "QUIT"        "The QUIT signal was received"; set_logfile_name "${ETL_LOG}.running" QUIT;        return ${ERR_CODE}' QUIT
+    trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "TERMINATED"  "The TERM signal was received"; set_logfile_name "${ETL_LOG}.running" TERMINATED;  return ${ERR_CODE}' TERM
+    trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; return ${ERR_CODE}' EXIT
+
+    echo "Jobname: ${ETL_JOBNAME:-[unset]}"
+
+
+    # Output the variable information for easier analysis incase of error
+    log_info "VARIABLES" "Source: (${INDICATOR_BRANCH})Branch (${INDICATOR_CMDLINE})Cmdline (${INDICATOR_ENVIRONMENT})Env (${INDICATOR_GLOBAL})Global (${INDICATOR_JOBNAME})Jobname (${INDICATOR_PROJECT})Project (${INDICATOR_SYSTEM})System (${INDICATOR_USER})User (${INDICATOR_DEFAULT})default (${INDICATOR_UNSET})unset"
+    printf "%-20s (%s) = %-65s\n"  ETL_BASE_DIR         "${WHEREIS_ETL_BASE_DIR:--}"         "${ETL_BASE_DIR}"
+    printf "%-20s (%s) = %-65s\n"  ETL_BRANCH           "${WHEREIS_ETL_BRANCH:--}"           "${ETL_BRANCH}"
+    printf "%-20s (%s) = %-65s\n"  ETL_COMMENT          "${WHEREIS_ETL_COMMENT:--}"          "${ETL_COMMENT}"
+    printf "%-20s (%s) = %-65s\n"  ETL_DATE             "${WHEREIS_ETL_DATE:--}"             "${ETL_DATE}"
+    printf "%-20s (%s) = %-65s\n"  ETL_EXECUTE          "${WHEREIS_ETL_EXECUTE:--}"          "${ETL_EXECUTE}"
+    #printf "%-20s (%s) = %-65s\n"  ETL_HOME             "${INDICATOR_DEFAULT}"               "${ETL_HOME}"
+    printf "%-20s (%s) = %-65s\n"  ETL_HOST             "${WHEREIS_ETL_HOST:--}"             "${ETL_HOST}"
+    printf "%-20s (%s) = %-65s\n"  ETL_INSTANCE         "${WHEREIS_ETL_INSTANCE:--}"         "${ETL_INSTANCE}"
+    #printf "%-20s (%s) = %-65s\n"  ETL_INSTANCE_ID      "${INDICATOR_DEFAULT}"               "${ETL_INSTANCE_ID}"
+    printf "%-20s (%s) = %-65s\n"  ETL_JOBNAME          "${WHEREIS_ETL_JOBNAME:--}"          "${ETL_JOBNAME}"
+    printf "%-20s (%s) = %-65s\n"  ETL_LOG              "${WHEREIS_ETL_LOG:--}"              "${ETL_LOG}"
+    printf "%-20s (%s) = %-65s\n"  ETL_PARAMS           "${WHEREIS_ETL_PARAMS:--}"           "${ETL_PARAMS[*]}"
+    printf "%-20s (%s) = %-65s\n"  ETL_PRIORITY         "${WHEREIS_ETL_PRIORITY:--}"         "${ETL_PRIORITY}"
+    printf "%-20s (%s) = %-65s\n"  ETL_PROGRAM          "${WHEREIS_ETL_PROGRAM:--}"          "${ETL_PROGRAM}"
+    printf "%-20s (%s) = %-65s\n"  ETL_PROJECT          "${WHEREIS_ETL_PROJECT:--}"          "${ETL_PROJECT}"
+    printf "%-20s (%s) = %-65s\n"  ETL_RECOVER          "${WHEREIS_ETL_RECOVER:--}"          "${ETL_RECOVER}"
+    printf "%-20s (%s) = %-65s\n"  ETL_REL_PATH         "${WHEREIS_ETL_REL_PATH:--}"         "${ETL_REL_PATH}"
+    #printf "%-20s (%s) = %-65s\n"  ETL_RESOURCE         "${WHEREIS_ETL_RESOURCE:--}"         "${ETL_RESOURCE[*]}"   
+    printf "%-20s (%s) = %-65s\n"  ETL_RUN_SCRIPT       "${WHEREIS_ETL_RUN_SCRIPT:--}"       "${ETL_RUN_SCRIPT}"
+    printf "%-20s (%s) = %-65s\n"  ETL_SYSTEM           "${WHEREIS_ETL_SYSTEM:--}"           "${ETL_SYSTEM}"
+    printf "%-20s (%s) = %-65s\n"  ETL_TRACKING         "${WHEREIS_ETL_TRACKING:--}"         "${ETL_TRACKING}"
+    printf "%-20s (%s) = %-65s\n"  ETL_USER             "${WHEREIS_ETL_USER:--}"             "${ETL_USER}"
+    printf "%-20s (%s) = %-65s\n"  ETL_VALIDATION_LEVEL "${WHEREIS_ETL_VALIDATION_LEVEL:--}" "${ETL_VALIDATION_LEVEL}"
+
+
+    # Check values are correct (cant really do this with parameters as their values are not to be used literally for this wrapper)
+    # load_validation_scripts
+    validate_etl_base_dir         "${ETL_BASE_DIR}"
+    validate_etl_branch           "${ETL_BRANCH}"
+    validate_etl_comment          "${ETL_COMMENT}"
+    validate_etl_date             "${ETL_DATE}"
+    validate_etl_execute          "${ETL_EXECUTE}"
+    validate_etl_host             "${ETL_HOST}"
+    validate_etl_instance         "${ETL_INSTANCE}"
+    validate_etl_jobname          "${ETL_JOBNAME}"
+    validate_etl_log              "${ETL_LOG}"
+    #validate_etl_params           "${ETL_PARAMS[@]}"
+    validate_etl_priority         "${ETL_PRIORITY}"
+    validate_etl_program          "${ETL_PROGRAM}"
+    validate_etl_project          "${ETL_PROJECT}"
+    validate_etl_rel_path         "${ETL_REL_PATH}"
+    validate_etl_recover          "${ETL_RECOVER}"
+    #validate_etl_resource         "${ETL_RESOURCE[@]}"
+    validate_etl_run_script       "${ETL_RUN_SCRIPT}"
+    validate_etl_system           "${ETL_SYSTEM}"
+    validate_etl_tracking         "${ETL_TRACKING}"
+    validate_etl_user             "${ETL_USER}"
+    validate_etl_validation_level "${ETL_VALIDATION_LEVEL}"
+
+
+    # Give this run its own ids
+    #init_work_dir
+
+    #log_info "GENERATED" "ETL_ID = ${ETL_ID}, ETL_BATCH_ID = ${ETL_BATCH_ID}"
+
+    # Will keep trying every 6 seconds for an hour before giving up
+    #SLEEP_TIME=6
+    #ATTEMPTS=600
+
+    # Request resources, instance units of 1
+    #resource_request --sleep "${SLEEP_TIME}" --attempts "${ATTEMPTS}" --user "${ETL_USER}" "${ETL_RESOURCE[@]}"
+
+    # Create temporary placeholder to make calling logic cleaner below
+    TRACKING_CMD=""
+    if [[ "${ETL_TRACKING:-false}" == "true" ]]
+    then
+        TRACKING_CMD="time -v -o ${ETL_LOG}.tracking"
+    fi
+
+    # Run the ETL program using nice to ensure a consistent priority level, if ETL_USER is not the current username
+    # then su into that user else run as normal.  
+    case "${ETL_HOST}" in
+
+        "${CURRENT_HOST_SHORT}" | "${CURRENT_HOST_LONG}" | "${CURRENT_HOST_IP}" )   # They want to run on the same host as this so no need to ssh
+                                                                                    if [[ "${ETL_USER}" != "${CURRENT_USER}" ]]
+                                                                                    then
+                                                                                        #su ${ETL_USER} -c "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
+                                                                                        sudo -u "${ETL_USER}" -i "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
+                                                                                    else
+                                                                                        nice -n "${ETL_PRIORITY}" ${TRACKING_CMD} "${ETL_RUN_SCRIPT}"
+                                                                                    fi
+                                                                                    ;;
+            *                                                                   )   ssh "${ETL_USER}@${ETL_HOST}" "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
+                                                                                    ;;
+
+        esac
+
+    RC=$?
+
+    # Release the resources as we're done with the job
+    #resource_release --sleep "${SLEEP_TIME}" --attempts "${ATTEMPTS}" --user "${ETL_USER}" "${ETL_RESOURCE[@]}"
+
+
+    # Now wait for the log listener to finish before exiting and reset file descriptors
+    #exec >&- 2>&- 3>&-
+    #wait ${ETL_COPROCESS_ID}
+
+    # Change the log name indicating the status of the job depending on its exit code
+    if [[ -n "${ETL_LOG}" && "${ETL_LOG}" != "/dev/null" ]]
+    then 
+        if [[ ${RC} -eq 0 ]]; then
+            set_logfile_name "${ETL_LOG}.running"
+        else
+            set_logfile_name "${ETL_LOG}.running" FAILED
+        fi
+    fi
+
+    return ${RC}
+}
+
+
+#--------------------------------------------------------------------------------------------------------------------
+#  Initialise Global Variables
+#--------------------------------------------------------------------------------------------------------------------
+
+PROGRAM=${0:##*/}                                                                      # Obtain the name of this script
+PROGRAM_DIR=$(dirname $0)                                                              # Obtain the directory containing this script
+CURRENT_USER=$(id -nu 2>/dev/null)                                                     # USER is not always available
+CURRENT_GROUP=$(id -gu 2>/dev/null)                                                    # GROUP is not always available
+CURRENT_HOST_SHORT=$(hostname -s 2>/dev/null)                                          # The short name of the host e.g. myhost
+CURRENT_HOST_LONG=$(hostname -a 2>/dev/null)                                           # The long name of the host e.g. myhost.internal.com
+CURRENT_HOST_IP=$(hostname -i 2>/dev/null)                                             # The ip address of the host e.g. 47.128.45.01
+
+#PARENT_PATH=$(ps -o "%a" -p $$ | tail -1 | grep "^/bin/ksh " | sed 's|^/bin/ksh||g')   # Find out what called this generic wrapper e.g. ksh, /bin/ksh scriptname etc
+VERSION=1.3
+
+# Set ETL_HOME to this scripts parent if not already set (might not actually be any benefit of having ETL_HOME....)
+if [[ -z "${ETL_HOME}" ]]
+then
+    export ETL_HOME="${PROGRAM_DIR}"
+fi
+
+if [[ ! -d "${ETL_HOME}" && ! -L "${ETL_HOME}" ]]
+then
+    echo "ETL_HOME is not a valid directory, it should be set to the installation directory of etl_wrapper.ksh" >&2
+    exit ${EXIT_CODE_BAD_INSTALLATION}
+fi
+
+if [[ ! -f "${ETL_HOME}/functions.ksh" && ! -L "${ETL_HOME}/functions.ksh" ]]
+then
+    echo "ETL_HOME/functions.ksh is not a valid script, does ETL_HOME point to a valid installation directory?" >&2
+    exit ${EXIT_CODE_BAD_INSTALLATION}
+fi
+
+if [[ ! -r "${ETL_HOME}/functions.ksh" || ! -x "${ETL_HOME}/functions.ksh" ]]
+then
+    echo "ETL_HOME/functions.ksh could not be sourced, please check file permissions" >&2
+    exit ${EXIT_CODE_BAD_INSTALLATION}
+fi
+
+. "${ETL_HOME}/functions.ksh"
+if [[ ! -r "${ETL_HOME}/functions.ksh" || ! -x "${ETL_HOME}/functions.ksh" ]]
+then
+    echo "ETL_HOME/functions.ksh could not be sourced, please check file permissions" >&2
+    exit ${EXIT_CODE_BAD_INSTALLATION}
+fi
+
+
+# Export all variables so downstream wrappers can access them if required
+export ETL_BASE_DIR         \
+       ETL_BRANCH           \
+       ETL_COMMENT          \
+       ETL_DATE             \
+       ETL_EXECUTE          \
+       ETL_HOST             \
+       ETL_INSTANCE         \
+       ETL_JOBNAME          \
+       ETL_LOG              \
+       ETL_PARAMS           \
+       ETL_PRIORITY         \
+       ETL_PROGRAM          \
+       ETL_PROJECT          \
+       ETL_REL_PATH         \
+       ETL_RESOURCE         \
+       ETL_RECOVER          \
+       ETL_RUN_SCRIPT       \
+       ETL_SYSTEM           \
+       ETL_TRACKING         \
+       ETL_USER             \
+       ETL_VALIDATION_LEVEL
+
+set -A ETL_PARAMS
+set -A ETL_RESOURCE
+
+# Holds the indicator values used to tell the user where a variable value comes from
+INDICATOR_UNSET="-"                 # This variable does not have a value
+INDICATOR_DEFAULT="*"               # This variables value was last set by this script
+INDICATOR_INCLUDE="i"               # This variables value was last set by an explicit include
+INDICATOR_ENVIRONMENT="e"           # This variables value was last set in the users environment
+INDICATOR_CMDLINE="c"               # This variables value was last set on the command line
+INDICATOR_GLOBAL="G"                # This variables value was last set by the global overrides
+INDICATOR_HOST="H"                  # This variables value was last set by the host overrides
+INDICATOR_SYSTEM="S"                # This variables value was last set by the system overrides
+INDICATOR_PROJECT="P"               # This variables value was last set by the project overrides
+INDICATOR_BRANCH="B"                # This variables value was last set by the branch overrides
+INDICATOR_JOBNAME="J"               # This variables value was last set by the jobname overrides
+INDICATOR_USER="u"                  # This variables value was last set by the user overrides
+INDICATOR_UHOST="h"                 # This variables value was last set by the user host overrides
+INDICATOR_USYSTEM="s"               # This variables value was last set by the user system overrides
+INDICATOR_UPROJECT="p"              # This variables value was last set by the user project overrides
+INDICATOR_UBRANCH="b"               # This variables value was last set by the user branch overrides
+INDICATOR_UJOBNAME="j"              # This variables value was last set by the user jobname overrides
+
+# Reset all internal variables incase they have been set outside of this script which could cause issues later
+# Set temporary variables to point to how our core variables were populated, if set here they were environmental
+# Save variables after we have identified them as environmental this way we start from a known baseline
+reset_variables
+set_variable_locators "${INDICATOR_ENVIRONMENT}"
+save_variables
+
+
+#--------------------------------------------------------------------------------------------------------------------
+#  Main
+#
+#  1 - Parse Command Line for overrides
+#  2 - Set defaults if required
+#  3 - Run ETL program
+#--------------------------------------------------------------------------------------------------------------------
+
+# Parse the command line arguments, deciding to override wrapper script variables
+# or append to ETL_PARAMS for later passing to the underlying program
+# Couldn't use getopt here as parameters have long names and a mixture of different arguments
+
+while [[ "${#}" -gt 0 ]]
+do
+
+    case "$1" in
+
+        \-h | \--help                 ) usage
+                                        exit 0
+                                        ;;
+        \-v | \--version              ) echo "${PROGRAM}: version ${VERSION}";
+                                        exit 0
+                                        ;;
+        \-f | \--file                 ) check_param_count 2 $@;   load_from_file "$2" "${INDICATOR_INCLUDE}"; shift 2
+                                        ;;
+        \-b | \--ETL_BASE_DIR         ) check_param_count 2 $@;   : ${ETL_BASE_DIR:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-c | \--ETL_COMMENT          ) check_param_count 2 $@;   : ${ETL_COMMENT:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-d | \--ETL_DATE             ) check_param_count 2 $@;   : ${ETL_DATE:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-e | \--ETL_RESOURCE         ) check_param_count 2 $@;   eval set -A ETL_RESOURCE -- "$2";           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-o | \--ETL_RECOVER          ) check_param_count 2 $@;   : ${ETL_RECOVER:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-i | \--ETL_INSTANCE         ) check_param_count 2 $@;   : ${ETL_INSTANCE:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-j | \--ETL_PROJECT          ) check_param_count 2 $@;   : ${ETL_PROJECT:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                       ;;
+        \-k | \--ETL_TRACKING         ) check_param_count 2 $@;   : ${ETL_TRACKING:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-l | \--ETL_LOG              ) check_param_count 2 $@;   : ${ETL_LOG:=$2};                           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-g | \--ETL_PROGRAM          ) check_param_count 2 $@;   : ${ETL_PROGRAM:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-n | \--ETL_BRANCH           ) check_param_count 2 $@;   : ${ETL_BRANCH:=$2};                        set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-p | \--ETL_PARAMS           ) check_param_count 2 $@;   eval set -A ETL_PARAMS   -- "$2";           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-r | \--ETL_REL_PATH         ) check_param_count 2 $@;   : ${ETL_REL_PATH:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-m | \--ETL_SYSTEM           ) check_param_count 2 $@;   : ${ETL_SYSTEM:=$2};                        set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-t | \--ETL_RUN_SCRIPT       ) check_param_count 2 $@;   : ${ETL_RUN_SCRIPT:=$2};                    set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-u | \--ETL_USER             ) check_param_count 2 $@;   : ${ETL_USER:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-v | \--ETL_VALIDATION_LEVEL ) check_param_count 2 $@;   : ${ETL_VALIDATION_LEVEL:=$2};              set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-w | \--ETL_JOBNAME          ) check_param_count 2 $@;   : ${ETL_JOBNAME:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-x | \--ETL_EXECUTE          ) check_param_count 2 $@;   : ${ETL_EXECUTE:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-y | \--ETL_PRIORITY         ) check_param_count 2 $@;   : ${ETL_PRIORITY:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        \-s | \--ETL_HOST             ) check_param_count 2 $@;   : ${ETL_HOST:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                        ;;
+        :::                           ) shift
+                                        break
+                                        ;;
+        *                             ) break
+                                        ;;
+
+    esac
+
+done
+
+# Any unknown parameters or parameters following a ::: are still to be consumed but will be passed to the underlying process
+while [[ "${#}" -gt 0 ]]
+do
+
+    ETL_PARAMS[${#ETL_PARAMS[@]}]="$1"
+    shift
+
+done
+
+
+# Check if any variables have been altered since the last save, e.g. since the start of the script
+set_variable_locators "${INDICATOR_CMDLINE}"
+
+
+# If any variables do not have a value then try to give them defaults, to allow users
+# to override these defaults e.g. logging directory etc we try running the overrides
+# from the most specific level onwards.
+load_user_overrides                                 # Try user specific overrides
+load_user_jobname_overrides                         # Try user job specific overrides
+load_user_project_overrides                         # Try user project specific overrides
+load_user_branch_overrides                          # Try user branch specific overrides
+load_user_system_overrides                          # Try user system specific overrides
+load_user_host_overrides                            # Try user host specific overrides
+load_overrides                                      # Try global overrides
+load_jobname_overrides                              # Try global job specific overrides
+load_project_overrides                              # Try global project specific overrides
+load_branch_overrides                               # Try global branch specific overrides
+load_system_overrides                               # Try global system specific overrides
+load_host_overrides                                 # Try global host specific overrides
+load_defaults                                       # Set defaults
+
+
+# If the overrides are done per instance its means ETL_INSTANCE cant override once set
+# however if done per instance it allows flexibility to do different overrides dependent on
+# the instance count / number etc e.g. different logging files etc
+# simplicity sake we allow overrides at a high level before running
+export ETL_INSTANCE_ID=0
+PROCESS_LIST=""
+
+# Run as many jobs as specified
+while [[ "${ETL_INSTANCE_ID}" -lt "${ETL_INSTANCE}" ]]
+do
+
+    run_program &
+    
+    PROCESS_LIST="${PROCESS_LIST} $!"
+    export ETL_INSTANCE_ID=$(( ETL_INSTANCE_ID + 1 ))
+
+    # Would we really want 5 jobs or 60 spawning at once? 1 second between should be ok, and gives some
+    # leeway to let the server balance or interupt if necessary
+    sleep 1
+
+done
+
+wait ${PROCESS_LIST}
+
+return $?
