@@ -280,7 +280,7 @@ function set_logfile_name
 
     # Check a new status was given and if so normalize / lowercase it for the filename
     if [[ -n "${FINAL_STATUS}" ]]; then
-        NEW_EXT=$(echo -n "${FINAL_STATUS}" | tr '[A-Z]' '[a-z]')
+        NEW_EXT=$(printf "%s" "${FINAL_STATUS}" | tr '[A-Z]' '[a-z]')
         NEW_ETL_LOG="${NEW_ETL_LOG}.${NEW_EXT}"
     fi
 
@@ -346,7 +346,7 @@ function validate_etl_branch
     then
         # Remove all non alphanumeric characters and underscores, whats left will be invalid
         # Note turn off echo adding a newline to the end of the branch
-        TEMP_VAR=$(echo -n "${ETL_BRANCH}" | tr -d '[:alnum:]_\-\.')
+        TEMP_VAR=$(printf "%s" "${ETL_BRANCH}" | tr -d '[:alnum:]_\-\.')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -374,8 +374,8 @@ function validate_etl_date
     
     if [[ -n "${ETL_DATE}" ]]
     then
-        #TEMP_VAR=$(echo -n "${ETL_DATE}" | tr -d '[:alnum:]_\-\.:')
-        TEMP_VAR=$(echo -n "${ETL_DATE}" | tr -d '[:digit:]')
+        #TEMP_VAR=$(printf "%s" "${ETL_DATE}" | tr -d '[:alnum:]_\-\.:')
+        TEMP_VAR=$(printf "%s" "${ETL_DATE}" | tr -d '[:digit:]')
 
         # TODO - Check century (and month/day ranges)
         # TODO - Check length
@@ -427,7 +427,7 @@ function validate_etl_host
 
     if [[ -n "${ETL_HOST}" ]]
     then
-        TEMP_VAR=$(echo -n "${ETL_HOST}" | tr -d '[:alnum:]\._')
+        TEMP_VAR=$(printf "%s" "${ETL_HOST}" | tr -d '[:alnum:]\._')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -453,7 +453,7 @@ function validate_etl_instance
     
     if [[ -n "${ETL_INSTANCE}" ]]
     then
-        TEMP_VAR=$(echo -n "${ETL_INSTANCE}" | tr -d '[:digit:]')
+        TEMP_VAR=$(printf "%s" "${ETL_INSTANCE}" | tr -d '[:digit:]')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -487,7 +487,7 @@ function validate_etl_jobname
     
     if [[ -n "${ETL_JOBNAME}" ]]
     then
-        TEMP_VAR=$(echo -n "${ETL_JOBNAME}" | tr -d '[:alnum:]_\-\.')
+        TEMP_VAR=$(printf "%s" "${ETL_JOBNAME}" | tr -d '[:alnum:]_\-\.')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -523,7 +523,7 @@ function validate_etl_log
             log_error "VALIDATE" "ETL_LOG is to be created in an invalid directory"
             exit ${EXIT_CODE_INVALID_ETL_LOG}
         else
-            TEMP_VAR=$(echo -n "${ETL_LOG}" | tr -d '[:alnum:]_\-\./')
+            TEMP_VAR=$(printf "%s" "${ETL_LOG}" | tr -d '[:alnum:]_\-\./')
 
             if [[ -n "${TEMP_VAR}" ]]
             then
@@ -563,7 +563,7 @@ function validate_etl_program
         log_error "VALIDATE" "ETL_PROGRAM is not set"
         exit ${EXIT_CODE_INVALID_ETL_PROGRAM}
     else
-        TEMP_VAR=$(echo -n "${ETL_PROGRAM}" | tr -d '[:alnum:]_\-\./')
+        TEMP_VAR=$(printf "%s" "${ETL_PROGRAM}" | tr -d '[:alnum:]_\-\./')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -590,7 +590,7 @@ function validate_etl_system
     
     if [[ -n "${ETL_SYSTEM}" ]]
     then
-        TEMP_VAR=$(echo "${ETL_SYSTEM}" | tr -d '[:alnum:]_\-\.')
+        TEMP_VAR=$(printf "%s\n" "${ETL_SYSTEM}" | tr -d '[:alnum:]_\-\.')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -618,7 +618,7 @@ function validate_etl_project
     
     if [[ -n "${ETL_PROJECT}" ]]
     then
-        TEMP_VAR=$(echo "${ETL_PROJECT}" | tr -d '[:alnum:]_\-\.')
+        TEMP_VAR=$(printf "%s\n" "${ETL_PROJECT}" | tr -d '[:alnum:]_\-\.')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -646,7 +646,7 @@ function validate_etl_rel_path
     
     if [[ -n "${ETL_REL_PATH}" ]]
     then
-        TEMP_VAR=$(echo "${ETL_REL_PATH}" | tr -d '[:alnum:]_\-\./')
+        TEMP_VAR=$(printf "%s\n" "${ETL_REL_PATH}" | tr -d '[:alnum:]_\-\./')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -702,7 +702,7 @@ function validate_etl_resource
         ii=0
         while [[ "${ii}" -lt "${RESOURCE_COUNT}" ]]
         do
-            TEMP_VAR=$(echo -n "${ETL_RESOURCE[$ii]}" | tr -d '[:alnum:]_\-\.=')
+            TEMP_VAR=$(printf "%s" "${ETL_RESOURCE[$ii]}" | tr -d '[:alnum:]_\-\.=')
 
             if [[ -n "${TEMP_VAR}" ]]
             then
@@ -711,11 +711,11 @@ function validate_etl_resource
             fi
 
             # Extractthe resource name = resource value key value pair
-            RESOURCE=$(echo -n "${ETL_RESOURCE[$ii]}" | cut -d"=" -f1)
-            UNITS=$(   echo -n "${ETL_RESOURCE[$ii]}" | cut -d"=" -f2)
+            RESOURCE=$(printf "%s" "${ETL_RESOURCE[$ii]}" | cut -d"=" -f1)
+            UNITS=$(   printf "%s" "${ETL_RESOURCE[$ii]}" | cut -d"=" -f2)
 
             # Validate the name
-            TEMP_VAR=$(echo -n"${RESOURCE}" | tr -d '[:alnum:]_\-\.')
+            TEMP_VAR=$(printf "%s" "${RESOURCE}" | tr -d '[:alnum:]_\-\.')
 
             if [[ -n "${TEMP_VAR}" ]]
             then
@@ -730,7 +730,7 @@ function validate_etl_resource
             fi
 
             # Validate the number of resources requested
-            TEMP_VAR=$(echo -n "${UNITS}" | tr -d '[:digit:]')
+            TEMP_VAR=$(printf "%s" "${UNITS}" | tr -d '[:digit:]')
 
             if [[ -n "${TEMP_VAR}" ]]
             then
@@ -794,7 +794,7 @@ function validate_etl_run_script
             log_error "VALIDATE" "ETL_RUN_SCRIPT can not be read"
             exit ${EXIT_CODE_INVALID_ETL_RUN_SCRIPT}
         else
-            TEMP_VAR=$(echo -n "${ETL_RUN_SCRIPT}" | tr -d '[:alnum:]_\-\./')
+            TEMP_VAR=$(printf "%s" "${ETL_RUN_SCRIPT}" | tr -d '[:alnum:]_\-\./')
 
             if [[ -n "${TEMP_VAR}" ]]
             then
@@ -844,7 +844,7 @@ function validate_etl_user
 
     if [[ -n "${ETL_USER}" ]]
     then
-        TEMP_VAR=$(echo -n "${ETL_USER}" | tr -d '[:alnum:]_')
+        TEMP_VAR=$(printf "%s" "${ETL_USER}" | tr -d '[:alnum:]_')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -933,7 +933,7 @@ function validate_etl_priority
     
     if [[ -n "${ETL_PRIORITY}" ]]
     then
-        TEMP_VAR=$(echo -n "${ETL_PRIORITY}" | tr -d '[:digit:]')
+        TEMP_VAR=$(printf "%s" "${ETL_PRIORITY}" | tr -d '[:digit:]')
 
         if [[ -n "${TEMP_VAR}" ]]
         then
@@ -1497,8 +1497,8 @@ function init_work_dir
         export ETL_BATCH_ID=$(( ETL_BATCH_ID + 1 ))
 
         # Write new ID's, write all to global id file/log, write more information but to specific jobname id files
-        echo -e "DATE=${DT}|PID=$$|USER=${CURRENT_USER}|ETL_ID=${ETL_ID}|ETL_BATCH_ID=${ETL_BATCH_ID}|ETL_JOBNAME=${ETL_JOBNAME}"                                                                    >> "${GLOBAL_ID_FILE}"
-        echo -e "DATE=${DT}|PID=$$|USER=${CURRENT_USER}|ETL_ID=${ETL_ID}|ETL_BATCH_ID=${ETL_BATCH_ID}|ETL_JOBNAME=${ETL_JOBNAME}|ETL_USER=${ETL_USER}|ETL_PROJECT=${ETL_PROJECT}|ETL_LOG=${ETL_LOG}" >> "${JOB_ID_FILE}"
+	printf "DATE=%s|PID=%s|USER=%s|ETL_ID=%s|ETL_BATCH_ID=%s|ETL_JOBNAME=%s\n"                                       "${DT}" "$$" "${CURRENT_USER}" "${ETL_ID}" "${ETL_BATCH_ID}" "${ETL_JOBNAME}"                                             >> "${GLOBL_ID_FILE}"
+	printf "DATE=%s|PID=%s|USER=%s|ETL_ID=%s|ETL_BATCH_ID=%s|ETL_JOBNAME=%s|ETL_USER=%s|ETL_PROJECT=%s|ETL_LOG=%s\n" "${DT}" "$$" "${CURRENT_USER}" "${ETL_ID}" "${ETL_BATCH_ID}" "${ETL_JOBNAME}" "${ETL_USER}" "${ETL_PROJECT}" "${ETL_LOG}" >> "${JOB_ID_FILE}"
 
     resource_release --sleep "${SLEEP_TIME}" --attempts "${ATTEMPTS}" --user "${USERNAME}" id=1
 }
@@ -1516,45 +1516,45 @@ function run_program
     i = 0
     while [[ $i -lt "${#ETL_PARAMS[@]}" ]]
     do
-        ETL_PARAMS[$i]=$(echo -n "${ETL_PARAMS[$i]}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+        ETL_PARAMS[$i]=$(printf "%s" "${ETL_PARAMS[$i]}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
         i=$(( i + 1 ))
     done
 
     #i = 0
     #while [[ $i -lt "${#ETL_RESOURCE[@]}" ]]
     #do
-    #    ETL_RESOURCE[$i]=$(echo -n "${ETL_RESOURCE[$i]}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    #    ETL_RESOURCE[$i]=$(printf "%s" "${ETL_RESOURCE[$i]}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
     #    i=$(( i + 1 ))
     #done
 
     # Replace etl instance id in a few key parameters (should probably do all at some point)
-    ETL_BASE_DIR=$(  echo -n "${ETL_BASE_DIR}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_BRANCH=$(    echo -n "${ETL_BRANCH}"     | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_COMMENT=$(   echo -n "${ETL_COMMENT}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_DATE=$(      echo -n "${ETL_DATE}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_EXECUTE=$(   echo -n "${ETL_EXECUTE}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_HOST=$(      echo -n "${ETL_HOST}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_JOBNAME=$(   echo -n "${ETL_JOBNAME}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_PRIORITY=$(  echo -n "${ETL_PRIORITY}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_PROGRAM=$(   echo -n "${ETL_PROGRAM}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_PROJECT=$(   echo -n "${ETL_PROJECT}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_RECOVER=$(   echo -n "${ETL_RECOVER}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_REL_PATH=$(  echo -n "${ETL_REL_PATH}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_RUN_SCRIPT=$(echo -n "${ETL_RUN_SCRIPT}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_SYSTEM=$(    echo -n "${ETL_SYSTEM}"     | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_TRACKING=$(  echo -n "${ETL_TRACKING}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    ETL_USER=$(      echo -n "${ETL_USER}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_BASE_DIR=$(  printf "%s" "${ETL_BASE_DIR}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_BRANCH=$(    printf "%s" "${ETL_BRANCH}"     | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_COMMENT=$(   printf "%s" "${ETL_COMMENT}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_DATE=$(      printf "%s" "${ETL_DATE}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_EXECUTE=$(   printf "%s" "${ETL_EXECUTE}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_HOST=$(      printf "%s" "${ETL_HOST}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_JOBNAME=$(   printf "%s" "${ETL_JOBNAME}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_PRIORITY=$(  printf "%s" "${ETL_PRIORITY}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_PROGRAM=$(   printf "%s" "${ETL_PROGRAM}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_PROJECT=$(   printf "%s" "${ETL_PROJECT}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_RECOVER=$(   printf "%s" "${ETL_RECOVER}"    | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_REL_PATH=$(  printf "%s" "${ETL_REL_PATH}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_RUN_SCRIPT=$(printf "%s" "${ETL_RUN_SCRIPT}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_SYSTEM=$(    printf "%s" "${ETL_SYSTEM}"     | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_TRACKING=$(  printf "%s" "${ETL_TRACKING}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
+    ETL_USER=$(      printf "%s" "${ETL_USER}"       | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
     
     # Maybe overkill but an extra few overrides just for logging
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%PID%|$$|g")
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%PPID%|$PPID|g")
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%HOST%|$CURRENT_HOST_SHORT|g")
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%HOSTNAME%|$CURRENT_HOST_LONG|g")
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%IP%|$CURRENT_HOST_IP|g")
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%USER%|$CURRENT_USER|g")
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%GROUP%|$CURRENT_GROUP|g")
-    ETL_LOG=$(       echo -n "${ETL_LOG}"        | sed "s|%VERSION%|$VERSION|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%PID%|$$|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%PPID%|$PPID|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%HOST%|$CURRENT_HOST_SHORT|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%HOSTNAME%|$CURRENT_HOST_LONG|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%IP%|$CURRENT_HOST_IP|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%USER%|$CURRENT_USER|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%GROUP%|$CURRENT_GROUP|g")
+    ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%VERSION%|$VERSION|g")
 
     # Setup a listener to log all output from this script from this point forwards, as a benefit this listener outputs
     # to screen as well as a file. It works like this:
@@ -1720,31 +1720,31 @@ VERSION=1.3
 # Set ETL_HOME to this scripts parent if not already set (might not actually be any benefit of having ETL_HOME....)
 if [[ -z "${ETL_HOME}" ]]
 then
-    export ETL_HOME="${PROGRAM_DIR}"
+    export ETL_HOME=$(dirname "${PROGRAM_DIR}" )
 fi
 
 if [[ ! -d "${ETL_HOME}" && ! -L "${ETL_HOME}" ]]
 then
-    echo "ETL_HOME is not a valid directory, it should be set to the installation directory of etl_wrapper.ksh" >&2
+    echo "ETL_HOME is not a valid directory, it should be set to the installation directory of etlw" >&2
     exit ${EXIT_CODE_BAD_INSTALLATION}
 fi
 
-if [[ ! -f "${ETL_HOME}/functions.ksh" && ! -L "${ETL_HOME}/functions.ksh" ]]
+if [[ ! -f "${ETL_HOME}/lib/functions.sh" && ! -L "${ETL_HOME}/lib/functions.sh" ]]
 then
-    echo "ETL_HOME/functions.ksh is not a valid script, does ETL_HOME point to a valid installation directory?" >&2
+    echo "ETL_HOME/lib/functions.sh is not a valid script, does ETL_HOME point to a valid installation directory?" >&2
     exit ${EXIT_CODE_BAD_INSTALLATION}
 fi
 
-if [[ ! -r "${ETL_HOME}/functions.ksh" || ! -x "${ETL_HOME}/functions.ksh" ]]
+if [[ ! -r "${ETL_HOME}/lib/functions.sh" || ! -x "${ETL_HOME}/lib/functions.sh" ]]
 then
-    echo "ETL_HOME/functions.ksh could not be sourced, please check file permissions" >&2
+    echo "ETL_HOME/lib/functions.sh could not be sourced, please check file permissions" >&2
     exit ${EXIT_CODE_BAD_INSTALLATION}
 fi
 
-. "${ETL_HOME}/functions.ksh"
-if [[ ! -r "${ETL_HOME}/functions.ksh" || ! -x "${ETL_HOME}/functions.ksh" ]]
+. "${ETL_HOME}/lib/functions.kh"
+if [[ #{?} -ne 0 || ! -r "${ETL_HOME}/lib/functions.sh" || ! -x "${ETL_HOME}/lib/functions.sh" ]]
 then
-    echo "ETL_HOME/functions.ksh could not be sourced, please check file permissions" >&2
+    echo "ETL_HOME/lib/functions.sh could not be sourced, please check file permissions" >&2
     exit ${EXIT_CODE_BAD_INSTALLATION}
 fi
 
@@ -1819,61 +1819,61 @@ do
 
     case "$1" in
 
-        \-h | \--help                 ) usage
-                                        exit 0
-                                        ;;
-        \-v | \--version              ) echo "${PROGRAM}: version ${VERSION}";
-                                        exit 0
-                                        ;;
-        \-f | \--file                 ) check_param_count 2 $@;   load_from_file "$2" "${INDICATOR_INCLUDE}"; shift 2
-                                        ;;
-        \-b | \--ETL_BASE_DIR         ) check_param_count 2 $@;   : ${ETL_BASE_DIR:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-c | \--ETL_COMMENT          ) check_param_count 2 $@;   : ${ETL_COMMENT:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-d | \--ETL_DATE             ) check_param_count 2 $@;   : ${ETL_DATE:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-e | \--ETL_RESOURCE         ) check_param_count 2 $@;   eval set -A ETL_RESOURCE -- "$2";           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-o | \--ETL_RECOVER          ) check_param_count 2 $@;   : ${ETL_RECOVER:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-i | \--ETL_INSTANCE         ) check_param_count 2 $@;   : ${ETL_INSTANCE:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-j | \--ETL_PROJECT          ) check_param_count 2 $@;   : ${ETL_PROJECT:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                       ;;
-        \-k | \--ETL_TRACKING         ) check_param_count 2 $@;   : ${ETL_TRACKING:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-l | \--ETL_LOG              ) check_param_count 2 $@;   : ${ETL_LOG:=$2};                           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-g | \--ETL_PROGRAM          ) check_param_count 2 $@;   : ${ETL_PROGRAM:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-n | \--ETL_BRANCH           ) check_param_count 2 $@;   : ${ETL_BRANCH:=$2};                        set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-p | \--ETL_PARAMS           ) check_param_count 2 $@;   eval set -A ETL_PARAMS   -- "$2";           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-r | \--ETL_REL_PATH         ) check_param_count 2 $@;   : ${ETL_REL_PATH:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-m | \--ETL_SYSTEM           ) check_param_count 2 $@;   : ${ETL_SYSTEM:=$2};                        set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-t | \--ETL_RUN_SCRIPT       ) check_param_count 2 $@;   : ${ETL_RUN_SCRIPT:=$2};                    set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-u | \--ETL_USER             ) check_param_count 2 $@;   : ${ETL_USER:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-v | \--ETL_VALIDATION_LEVEL ) check_param_count 2 $@;   : ${ETL_VALIDATION_LEVEL:=$2};              set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-w | \--ETL_JOBNAME          ) check_param_count 2 $@;   : ${ETL_JOBNAME:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-x | \--ETL_EXECUTE          ) check_param_count 2 $@;   : ${ETL_EXECUTE:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-y | \--ETL_PRIORITY         ) check_param_count 2 $@;   : ${ETL_PRIORITY:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        \-s | \--ETL_HOST             ) check_param_count 2 $@;   : ${ETL_HOST:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
-                                        ;;
-        :::                           ) shift
-                                        break
-                                        ;;
-        *                             ) break
-                                        ;;
+        -h | --help                 ) usage
+                                      exit 0
+                                      ;;
+        -v | --version              ) printf "%s: version %s\n" "${PROGRAM}" "${VERSION}"
+                                      exit 0
+                                      ;;
+        -f | --file                 ) check_param_count 2 $@;   load_from_file "$2" "${INDICATOR_INCLUDE}"; shift 2
+                                      ;;
+        -b | --ETL_BASE_DIR         ) check_param_count 2 $@;   : ${ETL_BASE_DIR:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -c | --ETL_COMMENT          ) check_param_count 2 $@;   : ${ETL_COMMENT:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -d | --ETL_DATE             ) check_param_count 2 $@;   : ${ETL_DATE:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -e | --ETL_RESOURCE         ) check_param_count 2 $@;   eval set -A ETL_RESOURCE -- "$2";           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -o | --ETL_RECOVER          ) check_param_count 2 $@;   : ${ETL_RECOVER:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -i | --ETL_INSTANCE         ) check_param_count 2 $@;   : ${ETL_INSTANCE:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -j | --ETL_PROJECT          ) check_param_count 2 $@;   : ${ETL_PROJECT:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                     ;;
+        -k | --ETL_TRACKING         ) check_param_count 2 $@;   : ${ETL_TRACKING:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -l | --ETL_LOG              ) check_param_count 2 $@;   : ${ETL_LOG:=$2};                           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -g | --ETL_PROGRAM          ) check_param_count 2 $@;   : ${ETL_PROGRAM:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -n | --ETL_BRANCH           ) check_param_count 2 $@;   : ${ETL_BRANCH:=$2};                        set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -p | --ETL_PARAMS           ) check_param_count 2 $@;   eval set -A ETL_PARAMS   -- "$2";           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -r | --ETL_REL_PATH         ) check_param_count 2 $@;   : ${ETL_REL_PATH:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -m | --ETL_SYSTEM           ) check_param_count 2 $@;   : ${ETL_SYSTEM:=$2};                        set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -t | --ETL_RUN_SCRIPT       ) check_param_count 2 $@;   : ${ETL_RUN_SCRIPT:=$2};                    set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -u | --ETL_USER             ) check_param_count 2 $@;   : ${ETL_USER:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -v | --ETL_VALIDATION_LEVEL ) check_param_count 2 $@;   : ${ETL_VALIDATION_LEVEL:=$2};              set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -w | --ETL_JOBNAME          ) check_param_count 2 $@;   : ${ETL_JOBNAME:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -x | --ETL_EXECUTE          ) check_param_count 2 $@;   : ${ETL_EXECUTE:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -y | --ETL_PRIORITY         ) check_param_count 2 $@;   : ${ETL_PRIORITY:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        -s | --ETL_HOST             ) check_param_count 2 $@;   : ${ETL_HOST:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+                                      ;;
+        ::                          ) shift
+                                      break
+                                      ;;
+                                    ) break
+                                      ;;
 
     esac
 
