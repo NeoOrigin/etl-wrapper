@@ -3,7 +3,7 @@
 # Script      : etlw
 # Summary     : A generic script to call ETL code
 # Details     : This script acts as a wrapper for any scheduler such as tws or control-m to call any ETL code module,
-#               including ab initio graphs, psets, simple ksh scripts etc.  Its intention is to provide a generic 
+#               including ab initio, talend, simple ksh scripts etc.  Its intention is to provide a generic 
 #               technology neutral ETL abstraction Layer, reducing custom development when integrating and calling
 #               ETL jobs via a scheduler, separating wrapper scripts from underlying ETL technology specifics such as
 #               environment setup or post run activities etc but also provide standardised formatting for quicker
@@ -35,7 +35,7 @@
 #                    15. (H) - Global Host level override file       (<install dir>/conf/etl_overrides.host.<host>.ksh)       \ /
 #                    16. (*) - Default values                                                                                  V
 #
-# Parameters  : Type etl_wrapper.ksh --help
+# Parameters  : Type etlw --help
 #
 # To Do
 # --------------
@@ -188,13 +188,14 @@ Usage:  ${PROGRAM} [<options> ... ] [[:::] <program parameters> ... ]
 
      6. The following example dynamically determines information from a configuration file, note how this file is
         significantly simpler than implementing a full wrapper script per process and reduces chances for errors
-        and improves code re-use.
+        and improves code re-use.  Config files also have the potential benefit of begin version controlled
+        alongside your code, rather than in a bespoke scheduler database schema etc.  
         
         Although passing parameters via ETL_PARAMS in a production environment is unusual it is however useful in
         development or test environments where access to IDE tools or locking of code for simple parameter changes
         during testing is discouraged.   
         
-          ${PROGRAM} --f ./pos_ftp_files.params
+          ${PROGRAM} -f ./pos_ftp_files.params
 
           # contents of ./pos_ftp_files.params
           ETL_BASE_DIR="${HOME}/sandboxes"
