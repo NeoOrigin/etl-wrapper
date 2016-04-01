@@ -1586,7 +1586,7 @@ function run_program
     trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "TERMINATED"  "The TERM signal was received"; set_logfile_name "${ETL_LOG}.running" TERMINATED;  return ${ERR_CODE}' TERM
     trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; return ${ERR_CODE}' EXIT
 
-    echo "Jobname: ${ETL_JOBNAME:-[unset]}"
+    printf "Jobname: %s\n" "${ETL_JOBNAME:-[unset]}"
 
 
     # Output the variable information for easier analysis incase of error
@@ -1725,26 +1725,26 @@ fi
 
 if [[ ! -d "${ETL_HOME}" && ! -L "${ETL_HOME}" ]]
 then
-    echo "ETL_HOME is not a valid directory, it should be set to the installation directory of etlw" >&2
+    printf "%s %s\n" "ETL_HOME" "is not a valid directory, it should be set to the installation directory of etlw" >&2
     exit ${EXIT_CODE_BAD_INSTALLATION}
 fi
 
 if [[ ! -f "${ETL_HOME}/lib/functions.sh" && ! -L "${ETL_HOME}/lib/functions.sh" ]]
 then
-    echo "ETL_HOME/lib/functions.sh is not a valid script, does ETL_HOME point to a valid installation directory?" >&2
+    printf "%s %s\n" "ETL_HOME/lib/functions.sh" "is not a valid script, does ETL_HOME point to a valid installation directory?" >&2
     exit ${EXIT_CODE_BAD_INSTALLATION}
 fi
 
 if [[ ! -r "${ETL_HOME}/lib/functions.sh" || ! -x "${ETL_HOME}/lib/functions.sh" ]]
 then
-    echo "ETL_HOME/lib/functions.sh could not be sourced, please check file permissions" >&2
+    printf "%s %s\n" "ETL_HOME/lib/functions.sh" "could not be sourced, please check file permissions" >&2
     exit ${EXIT_CODE_BAD_INSTALLATION}
 fi
 
 . "${ETL_HOME}/lib/functions.kh"
 if [[ #{?} -ne 0 || ! -r "${ETL_HOME}/lib/functions.sh" || ! -x "${ETL_HOME}/lib/functions.sh" ]]
 then
-    echo "ETL_HOME/lib/functions.sh could not be sourced, please check file permissions" >&2
+    printf "%s %s\n" "ETL_HOME/lib/functions.sh" "could not be sourced, please check file permissions" >&2
     exit ${EXIT_CODE_BAD_INSTALLATION}
 fi
 
