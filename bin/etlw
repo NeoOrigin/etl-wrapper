@@ -45,6 +45,8 @@
 # Resource management - configurable user or environment specific locks, sleep times, attempts etc
 # Resource management - validation, check pool can have x number of units allocated
 # Validation          - Externalize all validation functions so users can modify them easily
+# Parameters          - Implement additional parameters ETL_TMP_DIR
+# Logging             - Status file rather than rename logs mid run
 #
 #
 # Change History
@@ -56,6 +58,7 @@
 # 20/01/2014   Philip Bowditch    1.1        Cleanup and added additional override file options
 # 18/02/2015   Philip Bowditch    1.2        Fixed minor bugs, added ssh/host support
 # 23/02/2015   Philip Bowditch    1.3        Added support for running multiple instances
+# 01/04/2016   Philip Bowditch    1.4        Cleaned up code, posic compatibiltiy improvements
 #--------------------------------------------------------------------------------------------------------------------
 
 #--------------------------------------------------------------------------------------------------------------------
@@ -110,7 +113,7 @@ function usage
     #-----------------------------------------------------------------------------
 
     cat << EOF
-Usage:  ${PROGRAM} [<options> ... ] [[:::] <program parameters> ... ]
+Usage:  ${PROGRAM} [<options> ... ] [[--] <program parameters> ... ]
 
    Where <options> consists of zero or more of the following overrides
 
@@ -140,7 +143,7 @@ Usage:  ${PROGRAM} [<options> ... ] [[:::] <program parameters> ... ]
      ( -v | --version              )                           - Displays the version of the ${PROGRAM} script
 
    <program parameters> are defined as the first parameter that is not a recognised option of this script OR any parameter
-   that follows the triple colon delimiter (:::), from this point all subsequent parameters are all passed directly to the
+   that follows the double dash, from this point all subsequent parameters are all passed directly to the
    underlying program being called.
 
    NOTE - The setting of any of these parameters at an environment variable level will take priority over passing
@@ -160,7 +163,7 @@ Usage:  ${PROGRAM} [<options> ... ] [[:::] <program parameters> ... ]
         receive its value from the next best alternative according to the overrides precedence.  ETL_BRANCH as it is a known
         parameter and because it occurs before the triple colon will be set correctly)
 
-          ${PROGRAM} --ETL_BRANCH "main" ::: --ETL_DATE "20101018" --BATCH_ID "4"
+          ${PROGRAM} --ETL_BRANCH "main" -- --ETL_DATE "20101018" --BATCH_ID "4"
 
 
      3. The following runs the program with its default settings however the user has overridden the command to run
@@ -1057,8 +1060,8 @@ function save_variables
     SAVED_ETL_VALIDATION_LEVEL="${ETL_VALIDATION_LEVEL}"
 
     # -- ensures the next argument is not interpreted as an option if it starts with -
-    set -A SAVED_ETL_PARAMS -- "${ETL_PARAMS[@]}"
-    set -A SAVED_ETL_RESOURCE -- "${ETL_RESOURCE[@]}"
+    set -A SAVED_ETL_PARAMS -- "${ETL_PARAMS[@]}"      2>/dev/null || SAVED_ETL_PARAMS=( ${ETL_PARAMS[@]} )
+    set -A SAVED_ETL_RESOURCE -- "${ETL_RESOURCE[@]}"  2>/dev/null || SAVED_ETL_RESOURCE=( ${ETL_RESOURCE[@]} )
 }
 
 function set_variable_locators
@@ -1418,16 +1421,18 @@ function load_defaults
 
     DT=$(date "+%Y%m%d%H%M%S")
 
+    DEFAULT_RUN_SCRIPT="${PROGRAM_DIR}/${ETL_SYSTEM}_wrapper.ksh"
+
     export ETL_HOST=${ETL_HOST:-$CURRENT_HOST_SHORT}                                       # Set host to this host
     export ETL_INSTANCE=${ETL_INSTANCE:-1}                                                 # Run 1 instance at a time
     export ETL_PRIORITY=${ETL_PRIORITY:-10}                                                # set job priority
     export ETL_DATE=${ETL_DATE:-$DT}                                                       # set date
-    export ETL_USER=${ETL_USER:-"${CURRENT_USER}"}                                         # set user id to run as
+    export ETL_USER=${ETL_USER:-$CURRENT_USER}                                             # set user id to run as
     export ETL_TRACKING=${ETL_TRACKING:-false}                                             # set tracking to off
     export ETL_EXECUTE=${ETL_EXECUTE:-true}                                                # set execution to on
     export ETL_RECOVER=${ETL_RECOVER:-true}                                                # set job recovery to on
     export ETL_VALIDATION_LEVEL=${ETL_VALIDATION_LEVEL:-IGNORE}                            # set validation to off
-    export ETL_RUN_SCRIPT=${ETL_RUN_SCRIPT:-"${PROGRAM_DIR}/${ETL_SYSTEM}_wrapper.ksh"}    # set location of run program script
+    export ETL_RUN_SCRIPT=${ETL_RUN_SCRIPT:-$DEFAULT_RUN_SCRIPT}                           # set location of run program script
 
     set_variable_locators "${INDICATOR_DEFAULT}"
 }
@@ -1516,16 +1521,10 @@ function run_program
     i = 0
     while [[ $i -lt "${#ETL_PARAMS[@]}" ]]
     do
+        # Replaec any instance of ETL_INSTANCE_ID with this newly generated one
         ETL_PARAMS[$i]=$(printf "%s" "${ETL_PARAMS[$i]}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
         i=$(( i + 1 ))
     done
-
-    #i = 0
-    #while [[ $i -lt "${#ETL_RESOURCE[@]}" ]]
-    #do
-    #    ETL_RESOURCE[$i]=$(printf "%s" "${ETL_RESOURCE[$i]}" | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
-    #    i=$(( i + 1 ))
-    #done
 
     # Replace etl instance id in a few key parameters (should probably do all at some point)
     ETL_BASE_DIR=$(  printf "%s" "${ETL_BASE_DIR}"   | sed "s|%ETL_INSTANCE_ID%|${ETL_INSTANCE_ID}|g")
@@ -1556,10 +1555,7 @@ function run_program
     ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%GROUP%|$CURRENT_GROUP|g")
     ETL_LOG=$(       printf "%s" "${ETL_LOG}"        | sed "s|%VERSION%|$VERSION|g")
 
-    # Setup a listener to log all output from this script from this point forwards, as a benefit this listener outputs
-    # to screen as well as a file. It works like this:
-    # Save a reference to stdout to file descriptor 3.  tee will output to a file as well as to stdout but we make it
-    # go to this new copy as we will be re-directing the default stdout for all following processes.
+    # Initiaite log file to first stage 
     TEMP_LOG="${ETL_LOG:-/dev/null}"
     if [[ -n "${ETL_LOG}" && "${ETL_LOG}" != "/dev/null" ]]
     then
@@ -1567,13 +1563,19 @@ function run_program
     fi
 
 
+    # Setup a listener to log all output from this script from this point forwards, as a benefit this listener outputs
+    # to screen as well as a file. It works like this:
+    # Save a reference to stdout to file descriptor 3.  tee will output to a file as well as to stdout but we make it
+    # go to this new copy as we will be re-directing the default stdout for all following processes.
     #exec 3>&1
     #tee -a "${TEMP_LOG}" >&3 |&
     #ETL_COPROCESS_ID=$!
     #exec >&p 2>&1
 
-    # Slightly uglier method than using the above coprocess approach however it is far more supported
-    temp_pipe="/tmp/$CURRENT_USER.$$.$PPID.$ETL_DATE.$ETL_INSTANCE_ID.pipe"
+    # Slightly uglier method than using the above coprocess approach however it is far more supported across different shell implementations
+    # create a named pipe and start reading from it (will wait for data) this command will also pass to stdout anything on the pipe
+    # from this point forward redirect all errors and stdout to the pipe until told otherwise
+    temp_pipe="$ETL_TMP_DIR/$CURRENT_USER.$$.$PPID.$ETL_DATE.$ETL_INSTANCE_ID.pipe"
     mkfifo "$temp_pipe"
     tee -a "${TEMP_LOG}" < "$temp_pipe" &
     exec >"$temp_pipe" 2>"$temp_pipe"
@@ -1581,7 +1583,7 @@ function run_program
 
     #trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "ERROR"       "The command failed execution"; set_logfile_name "${ETL_LOG}.running" ERROR;       return ${ERR_CODE}' ERR
     trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "HANGUP"      "The HUP signal was received"; set_logfile_name "${ETL_LOG}.running" HANGUP;      return ${ERR_CODE}' HUP
-    trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "INTERRUPTED" "The INT signal was received, typically this occurs due to the use of control-c"; set_logfile_name "${ETL_LOG}.running"   INTERRUPTED; return ${ERR_CODE}' INT
+    trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "INTERRUPTED" "The INT signal was received,  typically this occurs due to the use of control-c"; set_logfile_name "${ETL_LOG}.running"   INTERRUPTED; return ${ERR_CODE}' INT
     trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "QUIT"        "The QUIT signal was received"; set_logfile_name "${ETL_LOG}.running" QUIT;        return ${ERR_CODE}' QUIT
     trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; log_error "TERMINATED"  "The TERM signal was received"; set_logfile_name "${ETL_LOG}.running" TERMINATED;  return ${ERR_CODE}' TERM
     trap 'ERR_CODE=$?; [[ -e "$temp_pipe" ]] && rm "$temp_pipe"; return ${ERR_CODE}' EXIT
@@ -1631,8 +1633,8 @@ function run_program
     validate_etl_priority         "${ETL_PRIORITY}"
     validate_etl_program          "${ETL_PROGRAM}"
     validate_etl_project          "${ETL_PROJECT}"
-    validate_etl_rel_path         "${ETL_REL_PATH}"
     validate_etl_recover          "${ETL_RECOVER}"
+    validate_etl_rel_path         "${ETL_REL_PATH}"
     #validate_etl_resource         "${ETL_RESOURCE[@]}"
     validate_etl_run_script       "${ETL_RUN_SCRIPT}"
     validate_etl_system           "${ETL_SYSTEM}"
@@ -1664,19 +1666,19 @@ function run_program
     # then su into that user else run as normal.  
     case "${ETL_HOST}" in
 
-        "${CURRENT_HOST_SHORT}" | "${CURRENT_HOST_LONG}" | "${CURRENT_HOST_IP}" )   # They want to run on the same host as this so no need to ssh
-                                                                                    if [[ "${ETL_USER}" != "${CURRENT_USER}" ]]
-                                                                                    then
-                                                                                        #su ${ETL_USER} -c "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
-                                                                                        sudo -u "${ETL_USER}" -i "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
-                                                                                    else
-                                                                                        nice -n "${ETL_PRIORITY}" ${TRACKING_CMD} "${ETL_RUN_SCRIPT}"
-                                                                                    fi
-                                                                                    ;;
-            *                                                                   )   ssh "${ETL_USER}@${ETL_HOST}" "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
-                                                                                    ;;
+        localhost | 127.0.0.1 | "${CURRENT_HOST_SHORT}" | "${CURRENT_HOST_LONG}" | "${CURRENT_HOST_IP}" )   # They want to run on the same host as this so no need to ssh
+                                                                                                            if [[ "${ETL_USER}" != "${CURRENT_USER}" ]]
+                                                                                                            then
+                                                                                                                #su ${ETL_USER} -c "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
+                                                                                                                sudo -u "${ETL_USER}" -i "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
+                                                                                                            else
+                                                                                                                nice -n "${ETL_PRIORITY}" ${TRACKING_CMD} "${ETL_RUN_SCRIPT}"
+                                                                                                            fi
+                                                                                                            ;;
+        *                                                                                               )   ssh "${ETL_USER}@${ETL_HOST}" "nice -n '${ETL_PRIORITY}' ${TRACKING_CMD} '${ETL_RUN_SCRIPT}'"
+                                                                                                            ;;
 
-        esac
+    esac
 
     RC=$?
 
@@ -1715,7 +1717,7 @@ CURRENT_HOST_LONG=$(hostname -a 2>/dev/null)                                    
 CURRENT_HOST_IP=$(hostname -i 2>/dev/null)                                             # The ip address of the host e.g. 47.128.45.01
 
 #PARENT_PATH=$(ps -o "%a" -p $$ | tail -1 | grep "^/bin/ksh " | sed 's|^/bin/ksh||g')   # Find out what called this generic wrapper e.g. ksh, /bin/ksh scriptname etc
-VERSION=1.3
+VERSION=1.4
 
 # Set ETL_HOME to this scripts parent if not already set (might not actually be any benefit of having ETL_HOME....)
 if [[ -z "${ETL_HOME}" ]]
@@ -1772,8 +1774,8 @@ export ETL_BASE_DIR         \
        ETL_USER             \
        ETL_VALIDATION_LEVEL
 
-set -A ETL_PARAMS
-set -A ETL_RESOURCE
+set -A ETL_PARAMS   2>/dev/null || ETL_PARAMS=()
+set -A ETL_RESOURCE 2>/dev/null || ETL_RESOURCE=()
 
 # Holds the indicator values used to tell the user where a variable value comes from
 INDICATOR_UNSET="-"                 # This variable does not have a value
@@ -1827,49 +1829,49 @@ do
                                       ;;
         -f | --file                 ) check_param_count 2 $@;   load_from_file "$2" "${INDICATOR_INCLUDE}"; shift 2
                                       ;;
-        -b | --ETL_BASE_DIR         ) check_param_count 2 $@;   : ${ETL_BASE_DIR:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -b | --ETL_BASE_DIR         ) check_param_count 2 $@;   ETL_BASE_DIR=${ETL_BASE_DIR:=$2};                               set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -c | --ETL_COMMENT          ) check_param_count 2 $@;   : ${ETL_COMMENT:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -c | --ETL_COMMENT          ) check_param_count 2 $@;   ETL_COMMENT=${ETL_COMMENT:=$2};                                 set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -d | --ETL_DATE             ) check_param_count 2 $@;   : ${ETL_DATE:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -d | --ETL_DATE             ) check_param_count 2 $@;   ETL_DATE=${ETL_DATE:=$2};                                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -e | --ETL_RESOURCE         ) check_param_count 2 $@;   eval set -A ETL_RESOURCE -- "$2";           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -e | --ETL_RESOURCE         ) check_param_count 2 $@;   eval set -A ETL_RESOURCE -- "$2" || eval ETL_RESOURCE=( $2 );   set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -o | --ETL_RECOVER          ) check_param_count 2 $@;   : ${ETL_RECOVER:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -o | --ETL_RECOVER          ) check_param_count 2 $@;   ETL_RECOVER=${ETL_RECOVER:=$2};                                 set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -i | --ETL_INSTANCE         ) check_param_count 2 $@;   : ${ETL_INSTANCE:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -i | --ETL_INSTANCE         ) check_param_count 2 $@;   ETL_INSTANCE=${ETL_INSTANCE:=$2};                               set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -j | --ETL_PROJECT          ) check_param_count 2 $@;   : ${ETL_PROJECT:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -j | --ETL_PROJECT          ) check_param_count 2 $@;   ETL_PROJECT=${ETL_PROJECT:=$2};                                 set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                      ;;
-        -k | --ETL_TRACKING         ) check_param_count 2 $@;   : ${ETL_TRACKING:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -k | --ETL_TRACKING         ) check_param_count 2 $@;   ETL_TRACKING=${ETL_TRACKING:=$2};                               set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -l | --ETL_LOG              ) check_param_count 2 $@;   : ${ETL_LOG:=$2};                           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -l | --ETL_LOG              ) check_param_count 2 $@;   ETL_LOG=${ETL_LOG:=$2};                                         set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -g | --ETL_PROGRAM          ) check_param_count 2 $@;   : ${ETL_PROGRAM:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -g | --ETL_PROGRAM          ) check_param_count 2 $@;   ETL_PROGRAM=${ETL_PROGRAM:=$2};                                 set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -n | --ETL_BRANCH           ) check_param_count 2 $@;   : ${ETL_BRANCH:=$2};                        set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -n | --ETL_BRANCH           ) check_param_count 2 $@;   ETL_BRANCH=${ETL_BRANCH:=$2};                                   set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -p | --ETL_PARAMS           ) check_param_count 2 $@;   eval set -A ETL_PARAMS   -- "$2";           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -p | --ETL_PARAMS           ) check_param_count 2 $@;   eval set -A ETL_PARAMS   -- "$2" || eval ETL_RESOURCE=( $2 );   set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -r | --ETL_REL_PATH         ) check_param_count 2 $@;   : ${ETL_REL_PATH:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -r | --ETL_REL_PATH         ) check_param_count 2 $@;   ETL_REL_PATH=${ETL_REL_PATH:=$2};                               set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -m | --ETL_SYSTEM           ) check_param_count 2 $@;   : ${ETL_SYSTEM:=$2};                        set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -m | --ETL_SYSTEM           ) check_param_count 2 $@;   ETL_SYSTEM=${ETL_SYSTEM:=$2};                                   set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -t | --ETL_RUN_SCRIPT       ) check_param_count 2 $@;   : ${ETL_RUN_SCRIPT:=$2};                    set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -t | --ETL_RUN_SCRIPT       ) check_param_count 2 $@;   ETL_RUN_SCRIPT=${ETL_RUN_SCRIPT:=$2};                           set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -u | --ETL_USER             ) check_param_count 2 $@;   : ${ETL_USER:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -u | --ETL_USER             ) check_param_count 2 $@;   ETL_USER=${ETL_USER:=$2};                                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -v | --ETL_VALIDATION_LEVEL ) check_param_count 2 $@;   : ${ETL_VALIDATION_LEVEL:=$2};              set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -v | --ETL_VALIDATION_LEVEL ) check_param_count 2 $@;   ETL_VALIDATION_LEVEL=${ETL_VALIDATION_LEVEL:=$2};               set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -w | --ETL_JOBNAME          ) check_param_count 2 $@;   : ${ETL_JOBNAME:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -w | --ETL_JOBNAME          ) check_param_count 2 $@;   ETL_JOBNAME=${ETL_JOBNAME:=$2};                                 set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -x | --ETL_EXECUTE          ) check_param_count 2 $@;   : ${ETL_EXECUTE:=$2};                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -x | --ETL_EXECUTE          ) check_param_count 2 $@;   ETL_EXECUTE=${ETL_EXECUTE:=$2};                                 set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -y | --ETL_PRIORITY         ) check_param_count 2 $@;   : ${ETL_PRIORITY:=$2};                      set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -y | --ETL_PRIORITY         ) check_param_count 2 $@;   ETL_PRIORITY=${ETL_PRIORITY:=$2};                               set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        -s | --ETL_HOST             ) check_param_count 2 $@;   : ${ETL_HOST:=$2};                          set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
+        -s | --ETL_HOST             ) check_param_count 2 $@;   ETL_HOST=${ETL_HOST:=$2};                                       set_variable_locators "${INDICATOR_CMDLINE}"; shift 2
                                       ;;
-        ::                          ) shift
+        --                          ) shift # Any left over parameters are treated as ETL_PARAMS
                                       break
                                       ;;
                                     ) break
@@ -1889,7 +1891,7 @@ do
 done
 
 
-# Check if any variables have been altered since the last save, e.g. since the start of the script
+# Check if any variables have been altered since the last save, e.g. since the start of the script, mostly this is for the aboe ETL_PARAMS processing
 set_variable_locators "${INDICATOR_CMDLINE}"
 
 
@@ -1911,28 +1913,37 @@ load_host_overrides                                 # Try global host specific o
 load_defaults                                       # Set defaults
 
 
+# Quick hacks, eventually make as parameters
+ETL_TMP_DIR=/tmp                # Where to create tmp files e.g. pipes
+ETL_INSTANCE_ID_OFFSET=0        # Starting id from which to generate instance id's
+ETL_INSTANCE_ID_STRIDE=1        # Amount to increment on each generated instance
+ETL_SPAWN_DELAY=1               # Time to sleep between spawning jobs
+
+
 # If the overrides are done per instance its means ETL_INSTANCE cant override once set
 # however if done per instance it allows flexibility to do different overrides dependent on
 # the instance count / number etc e.g. different logging files etc
 # simplicity sake we allow overrides at a high level before running
-export ETL_INSTANCE_ID=0
+export ETL_INSTANCE_ID="${ETL_INSTANCE_ID_OFFSET}"
 PROCESS_LIST=""
 
-# Run as many jobs as specified
+# Run as many jobs as specified, e.g. if instances are 4 then run 4
 while [[ "${ETL_INSTANCE_ID}" -lt "${ETL_INSTANCE}" ]]
 do
 
     run_program &
     
     PROCESS_LIST="${PROCESS_LIST} $!"
-    export ETL_INSTANCE_ID=$(( ETL_INSTANCE_ID + 1 ))
+    export ETL_INSTANCE_ID=$(( ETL_INSTANCE_ID + ETL_INSTANCE_ID_STRIDE ))
 
     # Would we really want 5 jobs or 60 spawning at once? 1 second between should be ok, and gives some
     # leeway to let the server balance or interupt if necessary
-    sleep 1
+    # Maybe we need a few ETL_CONCURRENCY parameters e.g. ETL_CONCURRENT_JOBS=4, ETL_CONCURRENT_TASKS=12
+    # i.e. spawn 12 but only 4 at a time?
+    sleep "${ETL_SPAWN_DELAY}"
 
 done
 
 wait ${PROCESS_LIST}
 
-return $?
+exit $?
