@@ -1,58 +1,17 @@
-#!/usr/bin/env ksh
+#!/bin/sh
 #--------------------------------------------------------------------------------------------------------------------
 # Script      : functions.sh
-# Summary     : A generic script to call ETL code
-# Details     : This script acts as a wrapper for any scheduler such as tws or control-m to call any ETL code module,
-#               including ab initio graphs, psets, simple ksh scripts etc.  Its intention is to provide a generic
-#               technology neutral ETL abstraction Layer, reducing custom development when integrating and calling
-#               ETL jobs via a scheduler, separating wrapper scripts from underlying ETL technology specifics such as
-#               environment setup or post run activities etc but also provide standardised formatting for quicker
-#               production defect resolution.
+# Summary     : A set of library functions to assist etlw
+# Details     : Contains common function definitions for string manipulation, logging, locking etc
 #
-#               This script implements a number of customisation options through environment variables, command line
-#               options as well as the introduction of override files (think custom .profile files).  These options
-#               allow developers / administrators to set varied configuration options depending on the ETL job
-#               being called e.g. redirect log output to different directories for different code branches,
-#               executing modules under a different user id for different projects, turn off module execution or
-#               perform enhanced validation for specific job names etc.
-#
-#               The exact order of precedence of these configuration options are as follows:
-#                                                                                                                             _ _
-#                     1. (e) - Environment variables                                                                           |
-#                     2. (i) - Explicit script includes passed to the wrapper                                                  |
-#                     3. (c) - Command line options                                                                            |
-#                     4. (u) - User level override file              (${HOME}/.etl/etl_overrides.ksh)                          |
-#                     5. (j) - User level Jobname override file      (${HOME}/.etl/etl_overrides.jobname.<jobname>.ksh)        |
-#                     6. (p) - User level Project override file      (${HOME}/.etl/etl_overrides.project.<project>.ksh)        |
-#                     7. (b) - User level Branch override file       (${HOME}/.etl/etl_overrides.branch.<branch>.ksh)          |
-#                     8. (s) - User level System level override file (${HOME}/.etl/etl_overrides.system.<system>.ksh)          |
-#                     9. (G) - Global level override file            (<install dir>/conf/etl_overrides.ksh)                    |
-#                    10. (J) - Global Jobname override file          (<install dir>/conf/etl_overrides.jobname.<jobname>.ksh)  |
-#                    11. (P) - Global Project override file          (<install dir>/conf/etl_overrides.project.<project>.ksh)  |
-#                    12. (B) - Global Branch override file           (<install dir>/conf/etl_overrides.branch.<branch>.ksh)   _|_
-#                    13. (S) - Global System level override file     (<install dir>/conf/etl_overrides.system.<system>.ksh)   \ /
-#                    14. (*) - Default values                                                                                  V
-#
-# Parameters  : Type etl_wrapper.ksh --help
-#
-# To Do
-# --------------
-# Lock management     - release lock on interrupts etc
-# Lock management     - configurable user or environment specific locks, sleep times, attempts etc
-# Resource management - release resource on interrupts etc
-# Resource management - configurable user or environment specific locks, sleep times, attempts etc
-# Resource management - validation, check pool can have x number of units allocated
-# Validation          - Externalize all validation functions so users can modify them easily
-#
+# Parameters  : None
 #
 # Change History
 # --------------
 #
 # Date         Author             Version    Description
 # ------------ ------------------ ---------- ------------------------------------------------------------------------
-# 04/02/2012   Philip Bowditch    1.0        Initial Version
-# 20/01/2014   Philip Bowditch    1.1        Cleanup and added additional override file options
-# 18/02/2015   Philip Bowditch    1.2        Fixed minor bugs
+# 01/04/2016   Philip Bowditch    1.0        Initial Version
 #--------------------------------------------------------------------------------------------------------------------
 
 #--------------------------------------------------------------------------------------------------------------------
