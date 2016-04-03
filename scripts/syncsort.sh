@@ -22,13 +22,13 @@
 
 if [[ -z "${ETL_HOME}" ]]
 then
-    printf "%s %s\n" ETL_HOME "is not set, it should be set to the installation directory of etl_wrapper.ksh" >&2
+    printf "%s %s\n" ETL_HOME "is not set, it should be set to the installation directory of etl-wrapper" >&2
     exit 1
 fi
 
 if [[ ! -d "${ETL_HOME}" && ! -L "${ETL_HOME}" ]]
 then
-    printf "%s %s\n" ETL_HOME "is not a valid directory, it should be set to the installation directory of etl_wrapper.ksh" >&2
+    printf "%s %s\n" ETL_HOME "is not a valid directory, it should be set to the installation directory of etl-wrapper" >&2
     exit 1
 fi
 
@@ -65,7 +65,7 @@ ETL_SS_BASE_DATA_DIR=${ETL_SS_BASE_DATA_DIR:-"${ETL_BASE_DIR}/${ETL_BRANCH}"}
 
 
 # Syncsort really supports 2 output formats, XML or text, however if xmllint is installed
-# we can conver the xml to html
+# we can convert the xml to html
 case "${ETL_SS_LOG_FORMAT}" in
 
     HTML ) TMP_FORMAT=XML
