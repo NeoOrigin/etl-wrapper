@@ -18,6 +18,49 @@
 # 20/02/2015   Philip Bowditch    1.0        Initial Version
 #--------------------------------------------------------------------------------------------------------------------
 
+#--------------------------------------------------------------------------------------------------------------------
+#  Set up global error codes
+#--------------------------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------------------------
+#  Set up common functions
+#--------------------------------------------------------------------------------------------------------------------
+
+function usage
+{
+    #-----------------------------------------------------------------------------
+    # Details    : This function outputs the usage information detailing how to
+    #              call this script.
+    #
+    # Parameters : None
+    #-----------------------------------------------------------------------------
+
+    cat << EOF
+   ${PROGRAM} 
+      ( -h | -help ) - Displays this usage statement and exits
+
+   Examples
+
+     1. The following runs the myplan1 script in the pos_outbound project which is located
+        under the path \$HOME/projects/test/MyCompany/POS/pos_outbound/bin/myplan1.sh
+
+          ${PROGRAM} \$HOME/projects test MyCompany/POS pos_outbound bin/myplan1.sh
+
+     2. The following runs the extract_mainframe hotfix graph under the same project
+
+          ${PROGRAM} \$HOME/projects test MyCompany/POS pos_inbound mp/fixes/extract_mainframe.mp
+
+     3. The following runs a custom korn shell script within the \$AI_BIN directory
+
+          ${PROGRAM} \$HOME/projects test MyCompany/POS pos_outbound bin/run_program.ksh
+
+     4. The following turns on tracking and ignores validation errors for the ab initio graph
+        the underlying DATE_ID parameter for the graph is also given a value on the command line
+
+          ${PROGRAM} -v IGNORE -t true \$HOME/projects test MyCompany/POS pos_outbound mp/extract_mainframe.mp -DATE_ID 20101027
+EOF
+}
+
 #-- Main ------------------------------------------------------------------------------------------------------------
 
 if [[ -z "${ETL_HOME}" ]]
@@ -52,11 +95,42 @@ then
 fi
 
 
-# These are temporary parameters used by this script, ensure they have no value
+#--------------------------------------------------------------------------------------------------------------------
+#  Initialise Global Variables
+#--------------------------------------------------------------------------------------------------------------------
+
+# unset / blank out temporary variables
 unset ETL_SS_HADOOP
 unset ETL_SS_RECOVER_OPTIONS
 unset TMP_PARAMETER_LIST
 unset TMP_FORMAT
+
+
+#--------------------------------------------------------------------------------------------------------------------
+#  Main
+#
+#  1 - Parse Command Line for options and setup variables
+#  2 - If information ot complete then try to infer information from what IS available
+#  3 - Perform validation (if necessary) generic to all file based processes
+#  4 - Determine type of process and perform validation (if necessary) for that process
+#  5 - Run ETL program
+#--------------------------------------------------------------------------------------------------------------------
+
+# Check if any options were passed otherwise exit and proceed on first unknown
+while [[ "${#}" -gt 0 ]]
+do
+
+   case "$1" in
+
+      -h | --help                  ) usage
+                                     exit 0
+                                     ;;
+      *                            ) break
+                                     ;;
+
+   esac
+
+done
 
 # Check if user wants us to pretty print the xml output
 ETL_SS_PRETTY_PRINT=${ETL_SS_PRETTY_PRINT:-true}
