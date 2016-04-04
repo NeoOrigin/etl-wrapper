@@ -237,7 +237,7 @@ function validate_native_program
                 trap 'log_error "VALIDATE" "${MSG}" $?' HUP INT QUIT TERM ERR
             fi
 
-            ksh -n ${ETL_PROGRAM_FULL_PATH}
+            ${SHELL} -n ${ETL_PROGRAM_FULL_PATH}
 
             trap - HUP INT QUIT TERM ERR
             MSG=""
@@ -265,9 +265,9 @@ function find_process_parent
         TEMP_PID=$(echo "${TEMP_OUT}" | cut -d, -f1)
         TEMP_CMD=$(echo "${TEMP_OUT}" | cut -d, -f2-)
 
-        starts_with "${TEMP_CMD}" "/bin/ksh "
+        starts_with "${TEMP_CMD}" "${SHELL} "
         if [[ $? -eq 0 ]]; then
-            TEMP_SCRIPT=$(echo "${TEMP_CMD}" | cut -d" " -f2)
+            TEMP_SCRIPT=$(printf "%s" "${TEMP_CMD}" | cut -d" " -f2)
             TEMP_SCRIPT=$(dirname "${TEMP_SCRIPT}")
 
             TEMP_SEARCH_PATH="${TEMP_SCRIPT} ${TEMP_SEARCH_PATH}"
@@ -294,6 +294,7 @@ function find_sandbox
     while [[ "${#}" -gt 0 ]]
     do
         TEMP_PATH="$1"
+        
         if [[ ! -e "${TEMP_PATH}" ]]
         then
             log_error "SEARCHING" "Could not find target program, ensure ETL_PROGRAM points to a full path, cd to a sandbox, pass a configuration file in the same sandbox or set ETL_PROJECT and ETL_REL_PATH explicitly" ${EXIT_CODE_FILE_DOES_NOT_EXIST}
@@ -320,7 +321,7 @@ function find_sandbox
         log_error "SEARCHING" "Could not find a default sandbox, please set parameters appropriately" ${EXIT_CODE_NO_SANDBOX_FOUND}
     fi
 
-    echo "${TEMP_PROJ}"
+    printf "%s\n" "${TEMP_PROJ}"
 }
 
 #trap 'ERR_CODE=$?; log_error "FAILURE" "${MSG}" ${ERR_CODE}' HUP INT QUIT TERM ERR
@@ -400,7 +401,7 @@ then
         exit $RC
     else
         log_info "INFERRING" "Core variable/s are not defined"
-        echo "Sandbox found at '${TEMP_PROJ}'"
+        printf "Sandbox found at '%s'" "${TEMP_PROJ}"
     fi
 
     # By this point we should have a sandbox found, try to get its project name
@@ -408,7 +409,7 @@ then
     PROJ_BASENAME=$(basename "${TEMP_PROJ}")
     if [[ $? -ne 0 || -z "${ETL_PROJECT}" ]]
     then
-        ETL_PROJECT=${ETL_PROJECT:-"${PROJ_BASENAME}"}
+        ETL_PROJECT=${ETL_PROJECT:-$PROJ_BASENAME}
         printf "%-20s (I) = %s\n" "ETL_PROJECT" "${ETL_PROJECT}"   
     elif [[ "${ETL_PROJECT}" != "${PROJ_BASENAME}" ]]
     then
