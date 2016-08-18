@@ -1,7 +1,7 @@
 # etl-wrapper
 
 [![GitHub license](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://raw.githubusercontent.com/NeoOrigin/etl-wrapper/master/LICENSE)
-[![GitHub release](https://img.shields.io/github/release/NeoOrigin/et-wrapper.svg)](https://github.com/NeoOrigin/etl-wrapper/releases/latest)
+[![GitHub release](https://img.shields.io/github/release/NeoOrigin/etl-wrapper.svg)](https://github.com/NeoOrigin/etl-wrapper/releases/latest)
 
 Provides a common generic interface to execute ETL jobs
 
