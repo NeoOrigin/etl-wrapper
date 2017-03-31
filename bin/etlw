@@ -1944,6 +1944,11 @@ do
 
 done
 
+# exit straight away if nothing ran
+if [[ -z "${PROCESS_LIST}" ]]; then
+    exit 0
+fi
+
 wait ${PROCESS_LIST}
 
 exit $?
