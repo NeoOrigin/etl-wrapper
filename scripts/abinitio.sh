@@ -62,30 +62,30 @@ function usage
    Examples
 
      1. The following runs the myplan1 plan in the pos_outbound project which is located
-        under the path \$HOME/sand/test/JLP/JL/POS/pos_outbound/plan/myplan1.plan
+        under the path \$HOME/sand/test/MyCompany/DWH/pos_outbound/plan/myplan1.plan
 
-          ${PROGRAM} \$HOME/sand test JLP/JL/POS pos_outbound plan/myplan1.plan
+          ${PROGRAM} \$HOME/sand test MyCompany/DWH pos_outbound plan/myplan1.plan
 
      2. The following runs the extract_mainframe hotfix graph under the same project
 
-          ${PROGRAM} \$HOME/sand test JLP/JL/POS pos_outbound mp/fixes/extract_mainframe.mp
+          ${PROGRAM} \$HOME/sand test MyCompany/DWH pos_outbound mp/fixes/extract_mainframe.mp
 
      3. The following runs the above graph, instanced by a particular pset
 
-          ${PROGRAM} \$HOME/sand test JLP/JL/POS pos_outbound pset/extract_mainframe.pset
+          ${PROGRAM} \$HOME/sand test MyCompany/DWH pos_outbound pset/extract_mainframe.pset
 
-     4. The following runs a custom korn shell script within the \$AI_BIN directory
+     4. The following runs a custom shell script within the \$AI_BIN directory
 
-          ${PROGRAM} \$HOME/sand test JLP/JL/POS pos_outbound bin/run_program.ksh
+          ${PROGRAM} \$HOME/sand test MyCompany/DWH pos_outbound bin/run_program.ksh
 
      5. The following turns on tracking and ignores validation errors for the ab initio graph
         the underlying DATE_ID parameter for the graph is also given a value on the command line
 
-          ${PROGRAM} -v IGNORE -t true \$HOME/sand test JLP/JL/POS pos_outbound mp/extract_mainframe.mp -DATE_ID 20101027
+          ${PROGRAM} -v IGNORE -t true \$HOME/sand test MyCompany/DWH pos_outbound mp/extract_mainframe.mp -DATE_ID 20101027
 
      6. The following performs validation on the ab initio pset, but does not run the pset
 
-          ${PROGRAM} -v WARN -x false \$HOME/sand test JLP/JL/POS pos_outbound mp/extract_mainframe.mp -DATE_ID 20101027
+          ${PROGRAM} -v WARN -x false \$HOME/sand test MyCompany/DWH pos_outbound mp/extract_mainframe.mp -DATE_ID 20101027
 EOF
 }
 
