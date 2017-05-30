@@ -3,7 +3,19 @@
 [![GitHub license](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://raw.githubusercontent.com/NeoOrigin/etl-wrapper/master/LICENSE)
 [![GitHub release](https://img.shields.io/github/release/NeoOrigin/etl-wrapper.svg)](https://github.com/NeoOrigin/etl-wrapper/releases/latest)
 
-Provides a common generic interface to execute ETL jobs
+Provides a common generic interface to execute ETL jobs. 
+
+ETL jobs regardless of the technology tend to share some common characteristics in their implementation. 
+
+1 Predominantly they are batch orientated and run at set intervals. 
+
+2 Frequently they are structured into a hierarchical project structure.
+
+3 They will run on a host remote to the scheduling host
+
+4 Jobs are created in the 1000's. To avoid migration issues the scheduler should be abstracted from implementation specifics
+
+5 An ETL environment will often contain multiple tools / methods, either for cost or performance reasons. This significantly increases the learning and complexity of the environment.
 
 ## Examples
 
